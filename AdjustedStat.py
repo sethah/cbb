@@ -48,16 +48,23 @@ class AdjustedStat(object):
         self.team_indices = {results[k][0]: k for k in xrange(len(results))}
         self.nteams = len(self.team_indices)
 
-    def preseason_rank(self, team_indices):
+    def preseason_rank(self):
         preseason_o = np.zeros((self.nteams, 1))
         preseason_d = np.zeros((self.nteams, 1))
 
-        self.query.kenpom(year)
-        self.query.execute()
-        for team in self.query.results:
-            adjo = team[0]/float(100)
-            adjd = team[1]/float(100)
-            teamid = team[2]
+        cols = {'ncaaid': 0, 'adjoe': 1, 'adjde': 2, 'team_id': 3}
+        q = """ SELECT a.ncaaid, a.adjoe, a.adjde, b.team_id
+                FROM kenpom a
+                JOIN teams b
+                ON a.ncaaid=b.ncaaid
+                AND a.year={season}
+            """.format(season=self.season()-1)
+        cur.execute(q)
+        for team in cur.fetchall():
+            adjo = team[cols['adjoe']]/float(100)
+            adjd = team[cols['adjde']]/float(100)
+            ncaaid = team[cols['ncaaid']]
+            teamid = team[cols['team_id']]
 
             # this needs to be fixed.
             # I don't have preseason numbers for these adjusted stats
@@ -65,14 +72,18 @@ class AdjustedStat(object):
                 adjo = 0.2
                 adjd = 0.2
             elif self.stat == 'efg':
-                adjo = 0.5
-                adjd = 0.5
+                adjo = 0.35
+                adjd = 0.35
             elif self.stat == 'ftr':
-                adjo = 0.5
-                adjd = 0.5
+                adjo = 0.25
+                adjd = 0.25
             preseason_d[self.team_indices[teamid]] = adjd
             preseason_o[self.team_indices[teamid]] = adjo
 
+        avg_o = np.mean(preseason_o[preseason_o > 0])
+        avg_d = np.mean(preseason_d[preseason_d > 0])
+        preseason_o[preseason_o==0] = avg_o
+        preseason_d[preseason_d==0] = avg_d
         return preseason_o, preseason_d
 
     def calc_stat(self, detailed):
@@ -84,21 +95,56 @@ class AdjustedStat(object):
 
         return detailed
 
+    def stat_query(self):
+        q = {}
+        q['ppp'] =  """ SELECT
+                            wloc,
+                            wteam,
+                            lteam,
+                            wscore / (0.96*(wfga - wor + wto + 0.475*wfta)) AS wppp,
+                            lscore / (0.96*(lfga - lor + lto + 0.475*lfta)) AS lppp
+                        FROM reg_detailed 
+                        WHERE daynum + (SELECT dayzero FROM seasons WHERE season=%s) < '%s'
+                        AND season=%s
+                    """ % (self.season(), self.date_string(), self.season())
+        q['ftr'] =  """ SELECT
+                            wloc,
+                            wteam,
+                            lteam,
+                            wfta / CAST(wfga AS REAL) AS wftr,
+                            lfta / CAST(lfga AS REAL) AS lftr
+                        FROM reg_detailed 
+                        WHERE daynum + (SELECT dayzero FROM seasons WHERE season=%s) < '%s'
+                        AND season=%s
+                    """ % (self.season(), self.date_string(), self.season())
+        q['trt'] =  """ SELECT
+                            wloc,
+                            wteam,
+                            lteam,
+                            wto / (0.96*(wfga - wor + wto + 0.475*wfta)) AS wtrt,
+                            lto / (0.96*(lfga - lor + lto + 0.475*lfta)) AS ltrt
+                        FROM reg_detailed 
+                        WHERE daynum + (SELECT dayzero FROM seasons WHERE season=%s) < '%s'
+                        AND season=%s
+                    """ % (self.season(), self.date_string(), self.season())
+        q['efg'] =  """ SELECT
+                            wloc,
+                            wteam,
+                            lteam,
+                            (wfgm + 0.5*wfgm3) / wfga AS wefg,
+                            (lfgm + 0.5*lfgm3) / lfga AS lefg
+                        FROM reg_detailed 
+                        WHERE daynum + (SELECT dayzero FROM seasons WHERE season=%s) < '%s'
+                        AND season=%s
+                    """ % (self.season(), self.date_string(), self.season())
+
+        return q[self.stat]
+
     def filter_dataframe(self):
         cols = {'wloc': 0, 'wteam': 1, 'lteam': 2,
-                'wposs': 3, 'lposs': 4, 'wppp': 5, 'lppp': 6}
-        q = """ SELECT
-                    wloc,
-                    wteam,
-                    lteam,
-                    0.96*(wfga - wor + 0.475*wfta) AS wposs,
-                    0.96*(lfga - lor + 0.475*lfta) AS lposs,
-                    wscore / (0.96*(wfga - wor + 0.475*wfta)) AS wppp,
-                    lscore / (0.96*(lfga - lor + 0.475*lfta)) AS lppp
-                FROM reg_detailed 
-                WHERE daynum + (SELECT dayzero FROM seasons WHERE season=%s) < '%s'
-                AND season=%s
-            """ % (self.season(), self.date_string(), self.season())
+                'wstat': 3, 'lstat': 4}
+        q = self.stat_query()
+
         cur.execute(q)
         return cur.fetchall(), cols
 
@@ -120,8 +166,8 @@ class AdjustedStat(object):
         r, c = raw_omat.shape
 
         for idx, game in enumerate(stats):
-            stat = game[cols['wppp']]
-            opp_stat = game[cols['lppp']]
+            stat = game[cols['wstat']]
+            opp_stat = game[cols['lstat']]
             team = game[cols['wteam']]
             opp = game[cols['lteam']]
 
@@ -143,8 +189,8 @@ class AdjustedStat(object):
             ind_mat[non_nan_o][team_idx] = opp_idx
             loc_mat[non_nan_o][team_idx] = loc_factor
 
-            stat = game[cols['lppp']]
-            opp_stat = game[cols['wppp']]
+            stat = game[cols['lstat']]
+            opp_stat = game[cols['wstat']]
             team = game[cols['lteam']]
             opp = game[cols['wteam']]
 
@@ -163,33 +209,57 @@ class AdjustedStat(object):
 
         return raw_omat, raw_dmat, ind_mat, loc_mat
 
+    def weight_vector(self, n, wtype='linear'):
+        if n == 0:
+            w = np.array([1])
+            return w[:, np.newaxis], 0
+        elif wtype == 'linear':
+            w = np.array(xrange(1, n+1))
+            w = w*(1/float(w.sum()))
+        else:
+            w = np.ones(n) / n
+
+        w = w[:, np.newaxis]
+        c = 0.4
+        n_pre = 10
+        w_pre = c - c*n/(n_pre)
+        w_pre = max(0, w_pre)  # don't return anything less than zero
+        w = w*(1./(w.sum()/(1 - w_pre)))
+
+        return w, w_pre
+
     def weight_matrix(self, raw_omat, wtype=''):
         if wtype == 'linear':
             weights = np.zeros(raw_omat.shape)
+            w_pre = np.ones(raw_omat.shape[1])
             for c in xrange(raw_omat.shape[1]):
                 col = raw_omat[:,c]
                 n = np.sum(~np.isnan(col))
                 if n == 0:
                     continue
-                w = np.array(xrange(1, n+1))
-                w = w * (1 / float(w.sum()))
-                weights[:n,c] = w
-            return weights
+                w, wp = self.weight_vector(n, wtype='linear')
+                weights[:n,c] = w.ravel()
+                w_pre[c] = wp
+            return weights, w_pre
         else:
             game_counts = np.sum(~np.isnan(raw_omat), axis=0)
             weights = np.ones(raw_omat.shape)
-            return weights / game_counts.astype(float)
+            return weights / game_counts.astype(float), w_pre
 
     def rank(self):
-        # create adjd matrix (will have nans) from adjd vec
         raw_omat, raw_dmat, ind_mat, loc_mat = self.initialize()
         adj_d = np.nanmean(raw_dmat, axis=0)
         adj_o = np.nanmean(raw_omat, axis=0)
         avg_o = np.nanmean(raw_omat)
         avg_d = np.nanmean(raw_dmat)
 
-        # need weight matrix
-        weights = self.weight_matrix(raw_omat, wtype='linear')
+        preseason_o, preseason_d = self.preseason_rank()
+        # print preseason_o
+
+        weights, w_pre = self.weight_matrix(raw_omat, wtype='linear')
+        # print w_pre
+        # print weights[:,0]
+        # print preseason_o
 
         for i in xrange(20):
             adj_dprev = adj_d*1
@@ -198,16 +268,11 @@ class AdjustedStat(object):
             new_omat = raw_omat / adj_d[np.nan_to_num(ind_mat).astype(int)] * loc_mat * weights * avg_o
             new_dmat = raw_dmat / adj_o[np.nan_to_num(ind_mat).astype(int)] * (1 / loc_mat) * weights * avg_d
 
-            # print new_omat
-
-            adj_o = np.sum(np.nan_to_num(new_omat), axis=0)
-            adj_d = np.sum(np.nan_to_num(new_dmat), axis=0)
+            adj_o = np.sum(np.nan_to_num(new_omat), axis=0) + w_pre*preseason_o.ravel() 
+            adj_d = np.sum(np.nan_to_num(new_dmat), axis=0) + w_pre*preseason_d.ravel()
             r_off = np.linalg.norm(np.nan_to_num(adj_oprev - adj_o))
             r_def = np.linalg.norm(np.nan_to_num(adj_dprev - adj_d))
-            # print adj_oprev - adj_omat
-            # break
-            # print r_off
-            # print adj_d[:10]
+            # print adj_o
 
         return adj_o, adj_d
 
@@ -241,7 +306,10 @@ class AdjustedStat(object):
             """.format(stat=self.stat, season=self.season(), dt=self.date_string())
         cur.execute(q)
         vals = []
-        for game in cur.fetchall():
+        results = cur.fetchall()
+        if len(results) == 0:
+            return None
+        for game in results:
             wteam = game[cols['wteam']]
             lteam = game[cols['lteam']]
             season = game[cols['season']]
@@ -270,52 +338,55 @@ class AdjustedStat(object):
             """.format(vals=','.join(['%s' % str(v) for v in vals]),
                        stat=self.stat)
         cur.execute(q)
-            # q = """ UPDATE reg_advanced
-            #         SET w{stat}={wstat},
-            #             l{stat}={lstat},
-            #             wd{stat}={wdstat},
-            #             ld{stat}={ldstat}
-            #         WHERE season={season}
-            #         AND daynum={daynum}
-            #         AND wteam={wteam}
-            #         AND lteam={lteam}
-            #     """.format(season=self.season(),
-            #                stat=self.stat,
-            #                wstat=wrtg,
-            #                lstat=lrtg,
-            #                wdstat=wdrtg,
-            #                ldstat=ldrtg,
-            #                daynum=self.daynum,
-            #                wteam=wteam,
-            #                lteam=lteam)
-            # cur.execute(q)
         conn.commit()
 
-if __name__ == '__main__':
-    # vals = [(1272,8,9),(1266,3,7)]
-    # q = """ UPDATE reg_advanced AS t SET
-    #         wppp=c.wppp,
-    #         lppp=c.lppp,
-    #         wdppp=c.wdppp,
-    #         ldppp=c.ldppp,
-    #         wteam=c.wteam
-    #         FROM (values {vals})
-    #         AS c(wteam, wppp, lppp, wdppp, ldppp)
-    #         WHERE c.wteam=t.wteam;
-    #     """.format(vals=','.join(['%s' % str(v) for v in vals]))
-    # print q
-    # cur.execute(q)
-    # conn.commit()
-
-    # return None
-
-    start_date = datetime(2013, 2, 21).date()
-    end_date = datetime(2013, 2, 28).date()
+def store_season(year, stats=['ppp']):
+    start_date = datetime(year, 11, 01).date()
+    end_date = datetime(year+1, 4, 10).date()
     day_count = (end_date - start_date).days + 1
 
-    for single_date in (start_date + timedelta(n) for n in xrange(day_count)):
-        a = AdjustedStat('ppp', single_date)
-        adj_o, adj_d = a.rank()
-        print 'storing.....'
-        a.store_ranks(adj_o, adj_d)
-        print single_date, a.daynum
+    for stat in stats:
+        for single_date in (start_date + timedelta(n) for n in xrange(day_count)):
+            a = AdjustedStat(stat, single_date)
+            adj_o, adj_d = a.rank()
+            print 'storing %s.....' % stat
+            a.store_ranks(adj_o, adj_d)
+            print single_date, a.daynum
+
+if __name__ == '__main__':
+    store_season(2014, stats=['ppp', 'efg', 'ftr', 'trt'])
+    # d = datetime(2013, 3, 14).date()
+    # a = AdjustedStat('ftr', d)
+
+
+""" select r.*, t.team_name, t.kenpom
+    from reg_advanced r
+    join teams t
+    on r.lteam=t.team_id
+    where wftr is not null
+    """
+
+""" SELECT
+        wteam,
+        lteam,
+        wloc,
+        CASE
+            WHEN wloc='H' then wteam
+            WHEN wloc='A' then lteam
+            ELSE NULL
+        END AS hteam,
+        CASE
+            WHEN wloc='H' then lteam
+            WHEN wloc='A' then wteam
+            ELSE NULL
+        END AS ateam
+    FROM reg_advanced
+"""
+""" SELECT a.*, c.wscore, c.lscore, c.loc
+    FROM reg_advanced a
+    JOIN reg_compact c
+    ON a.season=c.season
+    AND a.daynum=c.daynum
+    AND a.wteam=c.wteam
+    AND a.wftr IS NOT NULL
+"""
