@@ -97,6 +97,54 @@ def create_seeds(cur):
         """
     cur.execute(q)
 
+def create_ncaa_games(cur):
+    q = """ CREATE TABLE games_ncaa
+            (
+            dt DATE    NOT NULL,
+            hteam_id INT,
+            ateam_id INT,
+            home_score INT,
+            away_score INT,
+            neutral BOOLEAN,
+            home_outcome BOOLEAN,
+            numot INT,
+            box_link TEXT,
+            pbp_link TEXT,
+            game_id INT,
+            opp_string TEXT,
+            UNIQUE (game_id)
+            )
+        """
+    cur.execute(q)
+
+def create_ncaa_box(cur):
+    q = """ CREATE TABLE ncaa_box
+            (
+            game_id INT REFERENCES games_ncaa(game_id) NOT NULL,
+            team TEXT NOT NULL,
+            first_name TEXT NOT NULL,
+            last_name TEXT,
+            pos TEXT,
+            min INT,
+            fgm int,
+            fga int,
+            tpm int,
+            tpa int,
+            ftm int,
+            fta int,
+            pts int,
+            oreb int,
+            dreb int,
+            reb int,
+            ast int,
+            turnover int,
+            stl int,
+            blk int,
+            pf int
+            )
+        """
+    cur.execute(q)
+
 if __name__ == '__main__':
     conn = psycopg2.connect(database="cbb", user="seth", password="abc123",
                             host="localhost", port="5432")
@@ -105,5 +153,19 @@ if __name__ == '__main__':
     # create_teams(cur)
     # create_seasons(cur)
     # create_seeds(cur)
+    # create_ncaa_games(cur)
+    create_ncaa_box(cur)
     conn.commit()
     conn.close()
+
+q = """ WITH sub AS
+        (SELECT COUNT(ncaa_game_id), ncaa_game_id
+         FROM games_ncaa
+         GROUP BY ncaa_game_id
+         ORDER BY count desc)
+
+        SELECT a.dt, a.team1, a.team2, b.count, a.ncaa_game_id
+        FROM games_ncaa a
+        JOIN sub b
+        ON a.ncaa_game_id=b.ncaa_game_id
+        ORDER BY a.dt"""
