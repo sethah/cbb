@@ -72,10 +72,15 @@ class NCAAScraper(object):
             table = pd.concat([table, pd.read_html(str(html_tables[i]), skiprows=0, header=0, infer_types=False)[0]])
 
         # table = table[table.Score != 'nan']
+        table['game_id'] = [self.game_id(url)] * table.shape[0]
 
         return htable, table
 
     def time_to_dec(self, time_string, half):
+        # some rows may not have valid time strings
+        if ':' not in time_string:
+            return -1
+
         minutes, seconds = time_string.split(':')
         t = float(minutes) + float(seconds) / 60.
 
@@ -89,14 +94,17 @@ class NCAAScraper(object):
     def string_to_stat(self, stat_string):
         stat_string = stat_string.upper()
         stat_list = ['MADE', 'MISSED', 'REBOUND', 'ASSIST', 'BLOCK',
-                     'STEAL', 'TURNOVER', 'FOUL', 'TIMEOUT']
+                     'STEAL', 'TURNOVER', 'FOUL', 'TIMEOUT', 'ENTERS',
+                     'LEAVES']
         shot_list = {'THREE POINT': 'TPM', 'FREE THROW': 'FTM',
                      'LAYUP': 'LUM', 'TWO POINT': 'JM',
                      'DUNK': 'DM', 'TIP': 'TIM'}
         rebound_list = {'OFFENSIVE': 'OREB', 'TEAM': 'TREB',
-                        'DEFENSIVE': 'DREB'}
-        for stat in stat_list:
-            if stat in stat_string:
+                        'DEFENSIVE': 'DREB', 'DEADBALL': 'DEADREB'}
+        stat = None
+        for st in stat_list:
+            if st in stat_string:
+                stat = st
                 break
 
         if stat == 'MADE' or stat == 'MISSED':
@@ -113,53 +121,76 @@ class NCAAScraper(object):
         else:
             return stat
 
-    def format_pbp_stats(self, table):
-        table.columns = ['Time', 'team1', 'Score', 'team2']
+    def split_play(self, play_string):
+        pattern = r"^[A-Z,\s'.-]+\b"
+        # pattern = re.escape(pattern)
+        rgx = re.match(pattern, play_string)
+        if rgx is None:
+            player = ''
+        else:
+            player = rgx.group(0).strip()
+        play = play_string.replace(player, '').strip()
+        if player == 'TEAM' or player == 'TM':
+            last_name, first_name = '', 'TEAM'
+        elif ',' not in player:
+            print 'Bad player string', player
+            last_name, first_name = ('', '')
+        else:
+            splits = player.split(',')
+            last_name, first_name = splits[0], splits[1]
+
+        return play, first_name, last_name
+
+
+    def format_pbp_stats(self, table, htable):
+        table.columns = ['Time', 'team1', 'Score', 'team2', 'game_id']
         d = defaultdict(list)
-        hscores = []
-        ascores = []
-        times = []
-        first_names = []
-        last_names = []
-        players = []
-        plays = []
-        team_ids = []
-        half_subtractor = 20
         half = 0
         for i, row in table.iterrows():
             if row.Score == 'nan':
                 half += 1
                 continue
-            ascore, hscore = row.Score.split('-')
-            d['hscore'].append(hscore)
-            d['ascore'].append(ascore)
             if row.team1 == 'nan':
                 play_string = row.team2
                 d['teamid'].append(1)
             else:
                 play_string = row.team1
                 d['teamid'].append(0)
-            player = play_string.split()[0].strip()
-            d['player'].append(player)
-            if player == 'TEAM':
-                last_name, first_name = '', player
-            else:
-                last_name, first_name = player.split(',')
+            play, first_name, last_name = self.split_play(play_string)
+            play = self.string_to_stat(play)
+
+            t = self.time_to_dec(row.Time, half)
+
+            ascore, hscore = row.Score.split('-')
+            d['hscore'].append(hscore)
+            d['ascore'].append(ascore)
+                      
             
             d['first_name'].append(first_name)
             d['last_name'].append(last_name)
-            play = play_string.replace(player, '')
-            play = self.string_to_stat(play)
+            
             d['play'].append(play)
-            t = self.time_to_dec(row.Time, half)
+            
 
             d['time'].append(t)
 
-        table = table[table.Score != 'nan']
+        # if the score is nan then it is a end of half row
+        cond1 = table.Score != 'nan'
+        
+        table = table[cond1]
         for col in d:
             table[col] = d[col]
 
-        return table
+        cond2 = table.time > 0
+        table = table[cond2]
+        team1 = htable.iloc[0, 0]
+        team2 = htable.iloc[1, 0]
+        table['team'] = table.teamid.map(lambda x: team1 if x==0 else team2)
+        
+
+        keep_cols = ['game_id', 'time', 'teamid', 'team', 'first_name',
+                     'last_name', 'play', 'hscore', 'ascore']
+        return table[keep_cols]
 
     def get_box_stats(self, url):
         soup = self.page_opener.open_and_soup(url)
@@ -255,10 +286,41 @@ class NCAAScraper(object):
         CUR.executemany(q, vals)
         CONN.commit()
 
+    def scrape_pbp(self):
+        q = """ SELECT game_id, pbp_link, dt
+                FROM games_ncaa
+                WHERE game_id NOT IN
+                    (SELECT DISTINCT(game_id) FROM ncaa_pbp)
+                AND pbp_link IS NOT NULL
+                AND EXTRACT(YEAR FROM dt)=2014
+                ORDER BY DT DESC
+                LIMIT 200
+            """
+        CUR.execute(q)
+        results = CUR.fetchall()
+        for idx, item in enumerate(results):
+            try:
+                print idx, item[1]
+                htable, table = self.get_pbp_stats(item[1])
+                table = scraper.format_pbp_stats(table, htable)
+                q =  """ INSERT INTO ncaa_pbp 
+                            (game_id, time, teamid, team, first_name, 
+                             last_name, play, hscore, ascore) 
+                         VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                     """
+
+                vals = self.sql_convert(table.values)
+                CUR.executemany(q, vals)
+            except urllib2.URLError, HTTPError:
+                print 'URL or HTTP Error'
+                continue
+        CONN.commit()
+
 if __name__ == '__main__':
     scraper = NCAAScraper()
-    htable, table = scraper.get_pbp_stats('http://stats.ncaa.org/game/play_by_play/3610784')
-    table = scraper.format_pbp_stats(table)
+    # htable, table = scraper.get_pbp_stats('http://stats.ncaa.org/game/play_by_play/3610784')
+    # table = scraper.format_pbp_stats(table, htable)
+    scraper.scrape_pbp()
     
     # vals = scraper.sql_convert(table.values)
     # table = scraper.scrape_box()

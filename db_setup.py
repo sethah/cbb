@@ -145,6 +145,22 @@ def create_ncaa_box(cur):
         """
     cur.execute(q)
 
+def create_ncaa_pbp(cur):
+    q = """ CREATE TABLE ncaa_pbp
+            (
+            game_id INT REFERENCES games_ncaa(game_id) NOT NULL,
+            team TEXT NOT NULL,
+            teamid INT,
+            time REAL,
+            first_name TEXT NOT NULL,
+            last_name TEXT,
+            play TEXT,
+            hscore INT,
+            ascore INT
+            )
+        """
+    cur.execute(q)
+
 if __name__ == '__main__':
     conn = psycopg2.connect(database="cbb", user="seth", password="abc123",
                             host="localhost", port="5432")
@@ -154,7 +170,8 @@ if __name__ == '__main__':
     # create_seasons(cur)
     # create_seeds(cur)
     # create_ncaa_games(cur)
-    create_ncaa_box(cur)
+    # create_ncaa_box(cur)
+    create_ncaa_pbp(cur)
     conn.commit()
     conn.close()
 
