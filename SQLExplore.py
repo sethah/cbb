@@ -12,7 +12,7 @@ q['missing_games'] = """SELECT
                             EXTRACT(YEAR FROM dt) AS SEASON
                         FROM games_ncaa
                         WHERE game_id NOT IN
-                            (SELECT DISTINCT(game_id) FROM ncaa_pbp)
+                            (SELECT DISTINCT(game_id) FROM raw_pbp)
                         GROUP BY EXTRACT(YEAR FROM dt)
                         ORDER BY EXTRACT(YEAR FROM dt)
                      """
@@ -32,8 +32,8 @@ q['foul_totals'] = """SELECT game_id, play, teamid, time,
                       LIMIT 50;
                    """
 if __name__ == '__main__':
-    # df = pd.read_sql(q['missing_games'], CONN)
-    # print df
-    CUR.execute("""SELECT * FROM ncaa_pbp""", CONN)
-    for result in CUR.fetchall():
-        x = result
+    df = pd.read_sql(q['missing_games'], CONN)
+    print df
+    # CUR.execute("""SELECT * FROM ncaa_pbp""", CONN)
+    # for result in CUR.fetchall():
+    #     x = result

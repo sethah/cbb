@@ -146,8 +146,9 @@ def create_ncaa_box(cur):
     cur.execute(q)
 
 def create_ncaa_pbp(cur):
-    q = """ CREATE TABLE ncaa_pbp
+    q = """ CREATE TABLE raw_pbp
             (
+            id SERIAL PRIMARY KEY,
             game_id INT REFERENCES games_ncaa(game_id) NOT NULL,
             team TEXT NOT NULL,
             teamid INT,
@@ -157,6 +158,48 @@ def create_ncaa_pbp(cur):
             play TEXT,
             hscore INT,
             ascore INT
+            )
+        """
+    cur.execute(q)
+
+def create_url_errors(cur):
+    q = """ CREATE TABLE url_errors
+            (
+            id SERIAL PRIMARY KEY,
+            game_id INT REFERENCES games_ncaa(game_id) NOT NULL
+            )
+        """
+    cur.execute(q)
+
+def create_pbp_detailed(cur):
+    q = """ CREATE TABLE pbp
+            (
+            game_id INT REFERENCES games_ncaa(game_id) NOT NULL,
+            pbp_id INT REFERENCES raw_pbp(id) NOT NULL,
+            team TEXT NOT NULL,
+            teamid INT,
+            time REAL,
+            first_name TEXT NOT NULL,
+            last_name TEXT,
+            play TEXT,
+            hscore INT,
+            ascore INT,
+            possession INT,
+            poss_time_full INT NOT NULL,
+            poss_time INT,
+            home_fouls INT NOT NULL,
+            away_fouls INT NOT NULL,
+            second_chance INT,
+            timeout_pts INT,
+            turnover_pts INT,
+            and_one INT,
+            blocked BOOLEAN,
+            stolen BOOLEAN,
+            assisted BOOLEAN,
+            assist_play TEXT,
+            recipient TEXT,
+            charge BOOLEAN,
+            UNIQUE(pbp_id)
             )
         """
     cur.execute(q)
@@ -171,7 +214,9 @@ if __name__ == '__main__':
     # create_seeds(cur)
     # create_ncaa_games(cur)
     # create_ncaa_box(cur)
-    create_ncaa_pbp(cur)
+    # create_ncaa_pbp(cur)
+    create_pbp_detailed(cur)
+    # create_url_errors(cur)
     conn.commit()
     conn.close()
 

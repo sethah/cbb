@@ -37,6 +37,16 @@ class Page_Opener:
 class NCAAScraper(object):
 
     def __init__(self):
+        """
+        INPUT: NCAAScraper
+        OUTPUT: None
+
+        Initialize an ncaa stats scraper object
+
+        This object contains methods to pull box and play-by-play data
+        from stats.ncaa.org, process that data, and insert it into a 
+        PostgreSQL database.
+        """
         self.box_link_base = 'http://stats.ncaa.org/game/box_score/'
         self.pbp_link_base = 'http://stats.ncaa.org/game/play_by_play/'
         self.page_opener = Page_Opener()
@@ -64,6 +74,15 @@ class NCAAScraper(object):
         return int(url.split('?')[0].split('/')[-1])
 
     def get_pbp_stats(self, url):
+        """
+        INPUT: NCAAScraper, STRING
+        OUTPUT: DATAFRAME, DATAFRAME
+
+        Extract the pbp data and the game summary table from the pbp 
+        data page for a game.
+
+        url is a string which links to the pbp page
+        """
         soup = self.page_opener.open_and_soup(url)
         html_tables = soup.findAll('table', {'class': 'mytable'})
         htable = pd.read_html(str(html_tables[0]), header=0)[0]
@@ -71,12 +90,21 @@ class NCAAScraper(object):
         for i in xrange(2, len(html_tables)):
             table = pd.concat([table, pd.read_html(str(html_tables[i]), skiprows=0, header=0, infer_types=False)[0]])
 
-        # table = table[table.Score != 'nan']
         table['game_id'] = [self.game_id(url)] * table.shape[0]
 
         return htable, table
 
     def time_to_dec(self, time_string, half):
+        """
+        INPUT: NCAAScraper, STRING, INT
+        OUTPUT: FLOAT
+
+        Convert a time string 'MM:SS' remaining in a half to a 
+        float representing absolute time elapsed
+
+        time_string is a string in the form 'MM:SS'
+        half is an integer representing which half the game is in (>1 is OT)
+        """
         # some rows may not have valid time strings
         if ':' not in time_string:
             return -1
@@ -92,6 +120,15 @@ class NCAAScraper(object):
             return (40 + (half-1)*5) - t
 
     def string_to_stat(self, stat_string):
+        """
+        INPUT: NCAAScraper, STRING
+        OUTPUT: STRING
+
+        Convert a string which describes an action into a unique encoded 
+        string representing that action
+
+        stat_string is a string representing the action (e.g. 'missed dunk')
+        """
         stat_string = stat_string.upper()
         stat_list = ['MADE', 'MISSED', 'REBOUND', 'ASSIST', 'BLOCK',
                      'STEAL', 'TURNOVER', 'FOUL', 'TIMEOUT', 'ENTERS',
@@ -122,8 +159,19 @@ class NCAAScraper(object):
             return stat
 
     def split_play(self, play_string):
+        """
+        INPUT: NCAAScraper, STRING
+        OUTPUT: STRING, STRING, STRING
+
+        Split the raw full play string into a play, first name, and last name
+
+        play_string describes the play (e.g. DOE, JOHN made jumper)
+
+        WARNING: This will not work when the player's name is not in all caps.
+        Some of the older pbp pages do not use this pattern and so the player's
+        name will not be extracted properly
+        """
         pattern = r"^[A-Z,\s'.-]+\b"
-        # pattern = re.escape(pattern)
         rgx = re.match(pattern, play_string)
         if rgx is None:
             player = ''
@@ -143,6 +191,15 @@ class NCAAScraper(object):
 
 
     def format_pbp_stats(self, table, htable):
+        """
+        INPUT: NCAAScraper, DATAFRAME, DATAFRAME
+        OUTPUT: DATAFRAME
+
+        Convert the raw tables into tabular data for storage.
+
+        table is a dataframe containing raw pbp data
+        htable is a dataframe containing game summary info
+        """
         table.columns = ['Time', 'team1', 'Score', 'team2', 'game_id']
         d = defaultdict(list)
         half = 0
@@ -193,6 +250,14 @@ class NCAAScraper(object):
         return table[keep_cols]
 
     def get_box_stats(self, url):
+        """
+        INPUT: NCAAScraper, STRING
+        OUTPUT: DATAFRAME, DATAFRAME, DATAFRAME
+
+        Extract html from box stats page and convert to dataframes
+
+        url is a string linking to the box stats page
+        """
         soup = self.page_opener.open_and_soup(url)
         tables = soup.findAll('table', {'class': 'mytable'})
         if len(tables) != 3:
@@ -209,12 +274,24 @@ class NCAAScraper(object):
         table2['Team'] = [team2] * table2.shape[0]
         table1['game_id'] = [self.game_id(url)] * table1.shape[0]
         table2['game_id'] = [self.game_id(url)] * table2.shape[0]
+
+        # older box stat page versions use different column names so
+        # we must map them all to common column names (e.g. MIN vs. Min)
         table1 = self.rename_box_table(table1)
         table2 = self.rename_box_table(table2)
         
         return htable, table1, table2
 
     def format_box_table(self, table):
+        """
+        INPUT: NCAAScraper, DATAFRAME
+        OUTPUT: DATAFRAME
+
+        Format the box table to prepare for storage
+
+        table is a dataframe containing raw box stats
+        """
+        # minutes column is in form MM:00
         table['Min'] = table['Min'].map(lambda x: x.replace(':00', ''))
         format_cols = [col for col in table.columns \
                        if col not in {'Player', 'Pos', 'Team', 'game_id'}]
@@ -230,6 +307,12 @@ class NCAAScraper(object):
         return table
 
     def sql_convert(self, values):
+        """
+        INPUT: NCAAScraper, 2D Numpy Array
+        OUTPUT: 2D Numpy Array
+
+        Convert floats to ints and nans to None
+        """
         for i in xrange(len(values)):
             for j in xrange(len(values[0])):
                 if type(values[i][j]) == float:
@@ -242,12 +325,21 @@ class NCAAScraper(object):
         return values
 
     def rename_box_table(self, table):
+        """Map all columns to the same name"""
+
         d = {col: self.col_map[col] for col in table.columns}
         table = table.rename(columns=d)
 
         return table
 
     def scrape_box(self):
+        """
+        INPUT: NCAAScraper
+        OUTPUT: None
+
+        Scrape, format, and store box data
+        """
+        # store games that aren't already stored
         q = """ SELECT game_id, box_link
                 FROM games_ncaa
                 WHERE game_id NOT IN
@@ -264,7 +356,6 @@ class NCAAScraper(object):
             try:
                 print idx, item[1]
                 htable, table1, table2 = scraper.get_box_stats(item[1])
-                # assert False
                 table1 = scraper.format_box_table(table1)
                 table2 = scraper.format_box_table(table2)
                 table = pd.concat([table1, table2])
@@ -287,11 +378,20 @@ class NCAAScraper(object):
         CONN.commit()
 
     def scrape_pbp(self):
+        """
+        INPUT: NCAAScraper
+        OUTPUT: None
+
+        Scrape, format, and store pbp data
+        """
+        # some pages won't load so they are stored in 'url_errors' table 
+        # so we don't try them again
         q = """ SELECT game_id, pbp_link, dt
                 FROM games_ncaa
                 WHERE game_id NOT IN
-                    (SELECT DISTINCT(game_id) FROM ncaa_pbp)
+                    (SELECT DISTINCT(game_id) FROM raw_pbp)
                 AND pbp_link IS NOT NULL
+                AND game_id NOT IN (SELECT game_id FROM url_errors)
                 AND EXTRACT(YEAR FROM dt)=2014
                 ORDER BY DT DESC
                 LIMIT 200
@@ -303,7 +403,7 @@ class NCAAScraper(object):
                 print idx, item[1]
                 htable, table = self.get_pbp_stats(item[1])
                 table = scraper.format_pbp_stats(table, htable)
-                q =  """ INSERT INTO ncaa_pbp 
+                q =  """ INSERT INTO raw_pbp 
                             (game_id, time, teamid, team, first_name, 
                              last_name, play, hscore, ascore) 
                          VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
@@ -312,6 +412,12 @@ class NCAAScraper(object):
                 vals = self.sql_convert(table.values)
                 CUR.executemany(q, vals)
             except urllib2.URLError, HTTPError:
+                # store the pages that don't load
+                q = """ INSERT INTO url_errors
+                        (game_id)
+                        VALUES (%s)
+                    """ % item[0]
+                CUR.execute(q)
                 print 'URL or HTTP Error'
                 continue
         CONN.commit()
