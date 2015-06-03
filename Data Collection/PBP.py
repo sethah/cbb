@@ -259,7 +259,7 @@ class PBP(object):
                     possessions[idx] = abs(teamid - 1)
                     last_known_possession = abs(teamid - 1)
             elif play == 'TIMEOUT':
-                timeouts.append(j)
+                timeouts.append(idx)
             elif play == 'TREB':
                 possesions[idx] = last_known_possession
 
@@ -494,7 +494,7 @@ if __name__ == '__main__':
                 (SELECT DISTINCT(game_id)
                 FROM raw_pbp
                 WHERE game_id NOT IN (SELECT DISTINCT(game_id) FROM pbp)
-                LIMIT 10)
+                LIMIT 1000)
             ORDER BY id
         """
     df = pd.read_sql(q, CONN)
@@ -504,13 +504,13 @@ if __name__ == '__main__':
         pbpdf = pbp.process()
         if pbpdf is None:
             continue
-        if i == 0:
-            bigdf = pbpdf
-        else:
-            bigdf = pd.concat([bigdf, pbpdf])
+        # if i == 0:
+        #     bigdf = pbpdf
+        # else:`    
+        #     bigdf = pd.concat([bigdf, pbpdf])
         print i, game_id, pbp.poss_time_error()
 
-    insert_data(bigdf.values)
+        insert_data(pbpdf.values)
 
     # print bigdf.shape
     # start = time.time()
