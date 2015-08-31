@@ -172,7 +172,7 @@ class NCAAScraper(object):
         Some of the older pbp pages do not use this pattern and so the player's
         name will not be extracted properly
         """
-        pattern = r"^[A-Z,\s'.-]+\b"
+        pattern = r"^[A-Z,\s'\.-]+\b"
         rgx = re.match(pattern, play_string)
         if rgx is None:
             player = ''

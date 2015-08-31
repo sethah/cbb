@@ -1,7 +1,7 @@
 import psycopg2
 import pandas as pd
 
-CONN = psycopg2.connect(database="cbb", user="seth", password="abc123",
+CONN = psycopg2.connect(database="sethhendrickson", user="sethhendrickson", password="abc123",
                         host="localhost", port="5432")
 CUR = CONN.cursor()
 

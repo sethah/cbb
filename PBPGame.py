@@ -78,7 +78,6 @@ class PBPGame(object):
 
         return (home_team, '%0.2f' % home_team), (away_team, '%0.2f' % away_team)
 
-    
     def game_summary(self):
         self.summary_df()
         format_dict = {'int': {'second_chance',

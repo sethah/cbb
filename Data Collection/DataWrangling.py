@@ -6,7 +6,6 @@ conn = psycopg2.connect(database="cbb", user="seth", password="abc123",
 cur = conn.cursor()
 
 def add_covers():
-
     df = pd.read_csv('covers.csv')
     df = df.drop('Unnamed: 0', 1)
     for i, row in df.iterrows():
