@@ -1,16 +1,15 @@
-import psycopg2
 import pandas as pd
 import numpy as np
-from collections import defaultdict
-import time
-
-CONN = psycopg2.connect(database="cbb", user="seth", password="abc123",
-                        host="localhost", port="5432")
-CUR = CONN.cursor()
 
 class PBP(object):
 
-    def __init__(self, raw_df):
+    field_goals = {'LUM', 'LUMS', 'JM', 'JMS', 'TIM', 'TIMS',
+                   'TPM', 'TPMS', 'DM', 'DMS'}
+    point_vals = {'LUM': (2, 2), 'LUMS': (2, 0), 'JM': (2, 2), 'JMS': (2, 0),
+                  'TIM': (2, 2), 'TIMS': (2, 0), 'TPM': (3, 3), 'TPMS': (3, 0),
+                  'DM': (2, 2), 'DMS': (2, 0), 'FTM': (1, 1), 'FTMS': (1, 0)}
+
+    def __init__(self, raw_df, conn):
         """
         INPUT: PBP, DATAFRAME
         OUTPUT: None
@@ -35,18 +34,15 @@ class PBP(object):
         first loop through to process offensive fouls, and then we loop again
         to process possession.
         """
+        self.conn = conn
+        self.cur = self.conn.cursor()
         self.df = raw_df
         self.gameid = self.df.game_id.iloc[0]
         self.df = self.df[~self.df.play.isin({'ENTERS', 'LEAVES', 'DEADREB'})]
-        self.point_vals = {'LUM': (2, 2), 'LUMS': (2, 0), 'JM': (2, 2), 'JMS': (2, 0),
-             'TIM': (2, 2), 'TIMS': (2, 0), 'TPM': (3, 3), 'TPMS': (3, 0),
-             'DM': (2, 2), 'DMS': (2, 0), 'FTM': (1, 1), 'FTMS': (1, 0)}
         self.numot = int((np.ceil(self.df.time.iloc[-1]) - 40) / 5.)
         self.periods = np.array([20] + range(40, 40 + 5*self.numot, 5))
         self.data = self.df.values
         self.col_index = {col: idx for idx, col in enumerate(self.df.columns)}
-        self.field_goals = {'LUM', 'LUMS', 'JM', 'JMS', 'TIM', 'TIMS',
-                          'TPM', 'TPMS', 'DM', 'DMS'}
 
     def point_value(self, play):
         """
@@ -62,10 +58,7 @@ class PBP(object):
         a jumper is for two points and since it was made, it was worth two points.
         In contrast, JMS --> (2, 0) since it is a missed shot.
         """
-        if play in self.point_vals:
-            return self.point_vals[play]
-        else:
-            return (0, 0)
+        return PBP.point_vals.get(play, (0, 0))
 
     def poss_time_error(self):
         """
@@ -175,7 +168,7 @@ class PBP(object):
                     if flags[flag]:
                         d[flag][idx] = 0
                         flags[flag] = False
-            elif play in self.field_goals:
+            elif play in PBP.field_goals:
                 for flag in flags:
                     if flags[flag]:
                         if row[self.col_index['and_one']] > 0:
@@ -344,13 +337,13 @@ class PBP(object):
             if row[self.col_index['play']] == 'BLOCK':
                 if idx == 0:
                     pass
-                elif self.data[idx - 1][self.col_index['play']] in self.field_goals:
+                elif self.data[idx - 1][self.col_index['play']] in PBP.field_goals:
                     blocked[idx - 1] = True
             # ----------------------------------------
             if row[self.col_index['play']] == 'ASSIST':
                 if idx == 0:
                     pass
-                elif self.data[idx - 1][self.col_index['play']] in self.field_goals:
+                elif self.data[idx - 1][self.col_index['play']] in PBP.field_goals:
                     assisted[idx - 1] = True
                     rfirst_name = self.data[idx - 1][self.col_index['first_name']]
                     rlast_name = self.data[idx - 1][self.col_index['last_name']]
@@ -457,32 +450,32 @@ class PBP(object):
         self.sql_convert()
         return self.df
 
-def data_convert(values):
-    for i in xrange(len(values)):
-        for j in xrange(len(values[0])):
-            if type(values[i][j]) == float:
-                if values[i][j].is_integer():
-                    values[i][j] = int(values[i][j])
-                elif np.isnan(values[i][j]):
-                    values[i][j] = None
-            elif values[i][j] == 'nan':
-                values[i][j] = None
-    return values
-
-def insert_data(values):
-    values = data_convert(values)
-    q =  """ INSERT INTO pbp 
-                (game_id, pbp_id, team, teamid, time, first_name, last_name,
-                 play, hscore, ascore, possession, poss_time_full,
-                 poss_time, home_fouls, away_fouls, second_chance,
-                 timeout_pts, turnover_pts, and_one, blocked, stolen,
-                 assisted, assist_play, recipient, charge) 
-             VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
-                     %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-         """
-
-    CUR.executemany(q, values)
-    CONN.commit()
+# def data_convert(values):
+#     for i in xrange(len(values)):
+#         for j in xrange(len(values[0])):
+#             if type(values[i][j]) == float:
+#                 if values[i][j].is_integer():
+#                     values[i][j] = int(values[i][j])
+#                 elif np.isnan(values[i][j]):
+#                     values[i][j] = None
+#             elif values[i][j] == 'nan':
+#                 values[i][j] = None
+#     return values
+#
+# def insert_data(values):
+#     values = data_convert(values)
+#     q =  """ INSERT INTO pbp
+#                 (game_id, pbp_id, team, teamid, time, first_name, last_name,
+#                  play, hscore, ascore, possession, poss_time_full,
+#                  poss_time, home_fouls, away_fouls, second_chance,
+#                  timeout_pts, turnover_pts, and_one, blocked, stolen,
+#                  assisted, assist_play, recipient, charge)
+#              VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
+#                      %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+#          """
+#
+#     self.cur.executemany(q, values)
+#     self.conn.commit()
 
 
 if __name__ == '__main__':
@@ -497,25 +490,13 @@ if __name__ == '__main__':
                 LIMIT 1000)
             ORDER BY id
         """
-    df = pd.read_sql(q, CONN)
+    df = pd.read_sql(q, self.conn)
     for i, game_id in enumerate(df.game_id.unique()):
         subdf = df[df.game_id == game_id]
         pbp = PBP(subdf)
         pbpdf = pbp.process()
         if pbpdf is None:
             continue
-        # if i == 0:
-        #     bigdf = pbpdf
-        # else:`    
-        #     bigdf = pd.concat([bigdf, pbpdf])
         print i, game_id, pbp.poss_time_error()
 
         insert_data(pbpdf.values)
-
-    # print bigdf.shape
-    # start = time.time()
-    # pbp = PBP(pd.read_sql("""SELECT * FROM ncaa_pbp WHERE game_id=3652267""", CONN))
-    # middle = time.time()
-    # pbp.process()
-    # end = time.time()
-    # print middle - start, end - middle

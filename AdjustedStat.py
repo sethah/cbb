@@ -1,6 +1,5 @@
 import numpy as np
-from datetime import datetime, timedelta, date
-from itertools import izip
+from datetime import datetime, timedelta
 import psycopg2
 import pandas as pd
 
@@ -8,20 +7,14 @@ conn = psycopg2.connect(database="cbb", user="seth", password="abc123",
                         host="localhost", port="5432")
 cur = conn.cursor()
 
-q = """ select a.*, b.*
-    from teams b
-    left outer join teams2 a
-    on regexp_replace(a.ncaa,'[^a-zA-Z]', '', 'g')=regexp_replace(b.team_name,'[^a-zA-Z]', '', 'g')
-    or regexp_replace(a.espn_name,'[^a-zA-Z]', '', 'g')=regexp_replace(b.team_name,'[^a-zA-Z]', '', 'g')
-    or regexp_replace(a.kenpom,'[^a-zA-Z]', '', 'g')=regexp_replace(b.team_name,'[^a-zA-Z]', '', 'g')
-    """
-
 class AdjustedStat(object):
+    home_factor = 1.014
+    available_stats = {'efg', 'trt', 'ftr', 'ppp'}
 
     def __init__(self, stat, dt):
         self.dt = dt
         self.date_seq = datetime.strftime(dt, '%Y%m%d')
-        self.home_factor = 1.014
+        assert stat in AdjustedStat.available_stats, "available stats are: %s" % AdjustedStat.available_stats
         self.stat = stat
         self.dayzero = self.start_date()
         self.daynum = (self.dt - self.dayzero).days
@@ -35,12 +28,16 @@ class AdjustedStat(object):
         return datetime.strftime(self.dt, '%Y-%m-%d')
 
     def season(self):
-        if self.dt.month < 6:
-            return self.dt.year
-        else:
-            return self.dt.year + 1
+        return self.dt.year if self.dt.month < 6 else self.dt.year + 1
 
     def team_index(self):
+        """
+        INPUT: DataSummarizer, GROUPBY, STRING
+        OUTPUT: DATAFRAME, Int, Int, Float
+
+        This method creates a row index mapping for each team in the form
+        of {team_id: row_index}
+        """
         q = """SELECT team_id FROM teams"""
         cur.execute(q)
         results = cur.fetchall()
@@ -49,6 +46,14 @@ class AdjustedStat(object):
         self.nteams = len(self.team_indices)
 
     def preseason_rank(self):
+        """
+        INPUT: AdjustedStat
+        OUTPUT: 2D Numpy Array, 2D Numpy Array
+
+        This method generates a preseason offensive and defensive rank
+        matrices. For ppp we initialize to Ken Pomeroy's preseason rankings.
+        For others, initialize to constants.
+        """
         preseason_o = np.zeros((self.nteams, 1))
         preseason_d = np.zeros((self.nteams, 1))
 
@@ -61,13 +66,13 @@ class AdjustedStat(object):
             """.format(season=self.season()-1)
         cur.execute(q)
         for team in cur.fetchall():
-            adjo = team[cols['adjoe']]/float(100)
-            adjd = team[cols['adjde']]/float(100)
+            adjo = team[cols['adjoe']] / float(100)
+            adjd = team[cols['adjde']] / float(100)
             ncaaid = team[cols['ncaaid']]
             teamid = team[cols['team_id']]
 
-            # this needs to be fixed.
-            # I don't have preseason numbers for these adjusted stats
+            # TODO: I don't have preseason numbers for these adjusted stats
+            # TODO: and these are blatant guesses
             if self.stat == 'trt':
                 adjo = 0.2
                 adjd = 0.2
@@ -82,6 +87,8 @@ class AdjustedStat(object):
 
         avg_o = np.mean(preseason_o[preseason_o > 0])
         avg_d = np.mean(preseason_d[preseason_d > 0])
+
+        # for teams who were not found, initialize to average of all teams
         preseason_o[preseason_o==0] = avg_o
         preseason_d[preseason_d==0] = avg_d
         return preseason_o, preseason_d
@@ -172,9 +179,9 @@ class AdjustedStat(object):
             opp = game[cols['lteam']]
 
             if game[cols['wloc']] == 'H':
-                loc_factor = self.home_factor
+                loc_factor = AdjustedStat.home_factor
             elif game[cols['wloc']] == 'A':
-                loc_factor = 1 / self.home_factor
+                loc_factor = 1 / AdjustedStat.home_factor
             else:
                 loc_factor = 1
             
@@ -247,6 +254,13 @@ class AdjustedStat(object):
             return weights / game_counts.astype(float), w_pre
 
     def rank(self):
+        """
+        INPUT: DataSummarizer
+        OUTPUT: 2D Numpy Array, 2D Numpy Array
+
+        This method iterates to find the adjusted offensive and defensive
+        ranking matrices.
+        """
         raw_omat, raw_dmat, ind_mat, loc_mat = self.initialize()
         adj_d = np.nanmean(raw_dmat, axis=0)
         adj_o = np.nanmean(raw_omat, axis=0)
@@ -254,12 +268,8 @@ class AdjustedStat(object):
         avg_d = np.nanmean(raw_dmat)
 
         preseason_o, preseason_d = self.preseason_rank()
-        # print preseason_o
 
         weights, w_pre = self.weight_matrix(raw_omat, wtype='linear')
-        # print w_pre
-        # print weights[:,0]
-        # print preseason_o
 
         for i in xrange(20):
             adj_dprev = adj_d*1
@@ -272,7 +282,6 @@ class AdjustedStat(object):
             adj_d = np.sum(np.nan_to_num(new_dmat), axis=0) + w_pre*preseason_d.ravel()
             r_off = np.linalg.norm(np.nan_to_num(adj_oprev - adj_o))
             r_def = np.linalg.norm(np.nan_to_num(adj_dprev - adj_d))
-            # print adj_o
 
         return adj_o, adj_d
 

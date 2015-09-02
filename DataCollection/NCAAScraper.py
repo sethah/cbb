@@ -1,4 +1,3 @@
-import requests
 import httplib
 import urllib2
 import cookielib
@@ -8,13 +7,8 @@ import re
 import psycopg2
 import numpy as np
 from collections import defaultdict
-import traceback
 
-CONN = psycopg2.connect(database="cbb", user="seth", password="abc123",
-                        host="localhost", port="5432")
-CUR = CONN.cursor()
-
-class Page_Opener:
+class Page_Opener(object):
 
     def __init__(self):
         self.cookiejar = cookielib.LWPCookieJar()
@@ -32,12 +26,19 @@ class Page_Opener:
             pass
 
         the_page = response.read()
-        soup = BeautifulSoup(the_page)
+        soup = BeautifulSoup(the_page, "lxml")
         return soup
 
 class NCAAScraper(object):
+    box_link_base = 'http://stats.ncaa.org/game/box_score/'
+    pbp_link_base = 'http://stats.ncaa.org/game/play_by_play/'
+    box_columns = ['game_id', 'Team', 'first_name', 'last_name',
+                   'Pos','Min','FGM', 'FGA', '3FG', '3FGA', 'FT', 'FTA',
+                   'PTS', 'Off Reb', 'Def Reb', 'Tot Reb', 'AST', 'TO', 'ST',
+                   'BLKS', 'Fouls']
+    table_names = {'box': 'ncaa_box', 'pbp': 'raw_pbp'}
 
-    def __init__(self):
+    def __init__(self, conn):
         """
         INPUT: NCAAScraper
         OUTPUT: None
@@ -48,8 +49,8 @@ class NCAAScraper(object):
         from stats.ncaa.org, process that data, and insert it into a 
         PostgreSQL database.
         """
-        self.box_link_base = 'http://stats.ncaa.org/game/box_score/'
-        self.pbp_link_base = 'http://stats.ncaa.org/game/play_by_play/'
+        self.conn = conn
+        self.cur = self.conn.cursor()
         self.page_opener = Page_Opener()
         self.col_map = {'Min': 'Min', 'MP': 'Min', 'Tot Reb': 'Tot Reb',
                         'Pos': 'Pos', 'FGM': 'FGM', 'FGA': 'FGA', 
@@ -59,7 +60,7 @@ class NCAAScraper(object):
                         'DRebs': 'Def Reb', 'BLK': 'BLKS', 'BLKS': 'BLKS',
                         'ST': 'ST', 'STL': 'ST', 'Player': 'Player',
                         'AST': 'AST', 'TO': 'TO', 'Fouls': 'Fouls',
-                        'Team': 'Team', 'game_id': 'game_id'}
+                        'Team': 'Team', 'game_id': 'game_id', 'Time': 'Time'}
 
     def pbp_link(self, game_id):
         return self.pbp_link_base + str(int(game_id))
@@ -190,7 +191,6 @@ class NCAAScraper(object):
 
         return play, first_name, last_name
 
-
     def format_pbp_stats(self, table, htable):
         """
         INPUT: NCAAScraper, DATAFRAME, DATAFRAME
@@ -222,13 +222,11 @@ class NCAAScraper(object):
             ascore, hscore = row.Score.split('-')
             d['hscore'].append(hscore)
             d['ascore'].append(ascore)
-                      
             
             d['first_name'].append(first_name)
             d['last_name'].append(last_name)
             
             d['play'].append(play)
-            
 
             d['time'].append(t)
 
@@ -244,7 +242,6 @@ class NCAAScraper(object):
         team1 = htable.iloc[0, 0]
         team2 = htable.iloc[1, 0]
         table['team'] = table.teamid.map(lambda x: team1 if x==0 else team2)
-        
 
         keep_cols = ['game_id', 'time', 'teamid', 'team', 'first_name',
                      'last_name', 'play', 'hscore', 'ascore']
@@ -280,6 +277,8 @@ class NCAAScraper(object):
         # we must map them all to common column names (e.g. MIN vs. Min)
         table1 = self.rename_box_table(table1)
         table2 = self.rename_box_table(table2)
+        table1 = self.format_box_table(table1)
+        table2 = self.format_box_table(table2)
         
         return htable, table1, table2
 
@@ -301,8 +300,10 @@ class NCAAScraper(object):
         chars_to_remove = ['*', '-', '/', u'\xc2']
         rx = '[' + re.escape(''.join(chars_to_remove)) + ']'
         for col in format_cols:
-            table[col] = table[col].map(lambda x: 
-                                        re.sub(rx, '0', x)).astype(float)
+            # need to remove garbage characters if column type is object
+            if table[col].dtype == np.object:
+                table[col] = table[col].map(lambda x: re.sub(rx, '0', x)).astype(float)
+
         table['first_name'] = table.Player.map(lambda x: x.split(',')[-1].strip())
         table['last_name'] = table.Player.map(lambda x: x.split(',')[0].strip() if ',' in x else '')
         return table
@@ -333,37 +334,42 @@ class NCAAScraper(object):
 
         return table
 
-    def scrape_box(self):
+    def get_games_to_scrape(self, year, from_table='box', num_games=500):
+        if from_table == 'box':
+            table = NCAAScraper.table_names.get(from_table)
+        else:
+            table = NCAAScraper.table_names.get(from_table)
+        assert table, "From table must be in %s" % NCAAScraper.table_names.keys()
+
+        q = """ SELECT game_id, box_link, pbp_link, dt
+                FROM games_ncaa
+                WHERE game_id NOT IN
+                    (SELECT DISTINCT(game_id) FROM {table})
+                AND {check_link}_link IS NOT NULL
+                AND game_id NOT IN (SELECT game_id FROM url_errors)
+                AND EXTRACT(YEAR FROM dt)={year}
+                ORDER BY DT DESC
+                LIMIT {num_games}
+            """.format(table=table, year=year, num_games=num_games,
+                       check_link=from_table)
+        self.cur.execute(q)
+        results = self.cur.fetchall()
+        return results
+
+    def scrape_box(self, game_list):
         """
         INPUT: NCAAScraper
         OUTPUT: None
 
         Scrape, format, and store box data
         """
-        q = """ SELECT game_id, box_link, dt
-                FROM games_ncaa
-                WHERE game_id NOT IN
-                    (SELECT DISTINCT(game_id) FROM ncaa_box)
-                AND box_link IS NOT NULL
-                AND game_id NOT IN (SELECT game_id FROM url_errors)
-                AND EXTRACT(YEAR FROM dt)=2015
-                ORDER BY DT DESC
-                LIMIT 500
-            """
-        CUR.execute(q)
-        results = CUR.fetchall()
-        CUR.execute(q)
-        results = CUR.fetchall()
-        cols = ['game_id', 'Team', 'first_name', 'last_name',
-                'Pos','Min','FGM', 'FGA', '3FG', '3FGA', 'FT', 'FTA',
-                'PTS', 'Off Reb', 'Def Reb', 'Tot Reb', 'AST', 'TO', 'ST',
-                'BLKS', 'Fouls']
-        for idx, item in enumerate(results):
+        assert len(game_list[0]) == 4, "game list must be a four tuple"
+
+        cols = NCAAScraper.box_columns
+        for idx, (gameid, box_link, pbp_link, dt) in enumerate(game_list):
             try:
-                print idx, item[1]
-                htable, table1, table2 = scraper.get_box_stats(item[1])
-                table1 = scraper.format_box_table(table1)
-                table2 = scraper.format_box_table(table2)
+                print idx, box_link
+                htable, table1, table2 = scraper.get_box_stats(box_link)
                 table = pd.concat([table1, table2])
                 table = table[cols]
                 q =  """ INSERT INTO ncaa_box (game_id, team, first_name, last_name,
@@ -371,83 +377,67 @@ class NCAAScraper(object):
                         ast, turnover, stl, blk, pf) VALUES (%s, %s, %s, %s, %s, %s, %s,
                         %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)"""
                 vals = self.sql_convert(table.values)
-                CUR.executemany(q, vals)
+                self.cur.executemany(q, vals)
             except urllib2.URLError, HTTPError:
                 # store the pages that don't load
                 q = """ INSERT INTO url_errors
                         (game_id)
                         VALUES (%s)
-                    """ % item[0]
-                CUR.execute(q)
+                    """ % gameid
+                self.cur.execute(q)
                 print 'URL or HTTP Error'
                 continue
             except Exception, e:
                 print str(e)
-                CONN.commit()
-            
+                self.conn.commit()
+                raise
 
-        # big_table = big_table[cols]
-        
-        CONN.commit()
+        self.conn.commit()
 
-    def scrape_pbp(self):
+    def scrape_pbp(self, game_list):
         """
         INPUT: NCAAScraper
         OUTPUT: None
 
         Scrape, format, and store pbp data
         """
+        assert len(game_list[0]) == 4, "game list must be a four tuple"
         # some pages won't load so they are stored in 'url_errors' table 
         # so we don't try them again
-        q = """ SELECT game_id, pbp_link, dt
-                FROM games_ncaa
-                WHERE game_id NOT IN
-                    (SELECT DISTINCT(game_id) FROM raw_pbp)
-                AND pbp_link IS NOT NULL
-                AND game_id NOT IN (SELECT game_id FROM url_errors)
-                AND EXTRACT(YEAR FROM dt)=2015
-                ORDER BY DT DESC
-                LIMIT 500
-            """
-        CUR.execute(q)
-        results = CUR.fetchall()
-        for idx, item in enumerate(results):
-            if item[1] == '':
+        for idx, (gameid, box_link, pbp_link, dt) in enumerate(game_list):
+            if pbp_link == '':
                 continue
             try:
-                print idx, item[1]
-                htable, table = self.get_pbp_stats(item[1])
+                print idx, pbp_link
+                htable, table = self.get_pbp_stats(pbp_link)
                 table = scraper.format_pbp_stats(table, htable)
                 q =  """ INSERT INTO raw_pbp 
                             (game_id, time, teamid, team, first_name, 
                              last_name, play, hscore, ascore) 
                          VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
                      """
-
                 vals = self.sql_convert(table.values)
-                CUR.executemany(q, vals)
+                self.cur.executemany(q, vals)
             except urllib2.URLError, HTTPError:
                 # store the pages that don't load
+                # TODO: this needs to be handled more correctly
                 q = """ INSERT INTO url_errors
                         (game_id)
                         VALUES (%s)
-                    """ % item[0]
-                CUR.execute(q)
+                    """ % gameid
+                self.cur.execute(q)
                 print 'URL or HTTP Error'
                 continue
             except Exception, e:
                 print str(e)
-                CONN.commit()
+                self.conn.commit()
 
-        CONN.commit()
+        self.conn.commit()
 
 if __name__ == '__main__':
-    scraper = NCAAScraper()
-    # htable, table = scraper.get_pbp_stats('http://stats.ncaa.org/game/play_by_play/3610784')
-    # table = scraper.format_pbp_stats(table, htable)
-    scraper.scrape_box()
-    
-    # vals = scraper.sql_convert(table.values)
-    # table = scraper.scrape_box()
-    # args_str = ','.join(cur.mogrify("(%s,%s,%s,%s,%s,%s,%s,%s,%s)", x) for x in tup)
-    # cur.execute("INSERT INTO table VALUES " + args_str) 
+    conn = psycopg2.connect(database="sethhendrickson", user="sethhendrickson",
+                            password="abc123", host="localhost", port="5432")
+    scraper = NCAAScraper(conn)
+    link = 'http://stats.ncaa.org/game/box_score/3545511'
+    games = scraper.get_games_to_scrape(2015, 'box', 1000)
+    scraper.scrape_box(games)

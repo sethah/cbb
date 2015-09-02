@@ -90,8 +90,3 @@ if __name__ == '__main__':
     # dates = season_dates()
     # print_urls(season_dates)
     store_csv()
-    
-
-
-
-    
