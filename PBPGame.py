@@ -31,10 +31,6 @@ class PBPGame(object):
         self.numot = data[7]
         self.home_outcome = data[6]
 
-    def box_stats(self):
-        d = {}
-        q = """SELECT * FROM """
-
     def summary_df(self):
         summary_cols = ['second_chance', 'timeout_pts', 'turnover_pts',
                         'and_one', 'charge', 'blocked', 'stolen', 'assisted',
@@ -48,7 +44,6 @@ class PBPGame(object):
             # data.append([col, hteam[1], ateam[1]])
 
         # self.summary_df = pd.DataFrame(data, columns=['stat', self.home_team, self.away_team])
-       
 
     def summary_stat(self, col):
         if col in {'and_one', 'charge', 'blocked', 'stolen'}:

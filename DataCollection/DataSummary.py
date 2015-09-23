@@ -1,6 +1,7 @@
-import psycopg2
 import pandas as pd
-from datetime import datetime, date
+
+from DataCollection import DB
+
 
 class DataSummarizer(object):
 
@@ -8,8 +9,8 @@ class DataSummarizer(object):
     def season(dt):
         return dt.year if dt.month < 6 else dt.year + 1
 
-    def __init__(self, conn):
-        self.conn = conn
+    def __init__(self):
+        self.conn = DB.conn
         self.cur = self.conn.cursor()
 
     def games_in_db(self, total_games_gb, table_name):
@@ -63,7 +64,5 @@ class DataSummarizer(object):
         print self.print_game_summary('ncaa_box', merged, games_in_db, total_games, pct_total)
 
 if __name__ == "__main__":
-    conn = psycopg2.connect(database="sethhendrickson", user="sethhendrickson",
-                            password="abc123", host="localhost", port="5432")
-    summarizer = DataSummarizer(conn)
+    summarizer = DataSummarizer()
     summarizer.game_summary()

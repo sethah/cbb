@@ -1,12 +1,15 @@
 import httplib
 import urllib2
 import cookielib
+import re
+from collections import defaultdict
+
 from bs4 import BeautifulSoup
 import pandas as pd
-import re
-import psycopg2
 import numpy as np
-from collections import defaultdict
+
+from DB import DB
+
 
 class Page_Opener(object):
 
@@ -37,8 +40,17 @@ class NCAAScraper(object):
                    'PTS', 'Off Reb', 'Def Reb', 'Tot Reb', 'AST', 'TO', 'ST',
                    'BLKS', 'Fouls']
     table_names = {'box': 'ncaa_box', 'pbp': 'raw_pbp'}
+    col_map = {'Min': 'Min', 'MP': 'Min', 'Tot Reb': 'Tot Reb',
+               'Pos': 'Pos', 'FGM': 'FGM', 'FGA': 'FGA',
+               '3FG': '3FG', '3FGA': '3FGA','FT': 'FT',
+               'FTA': 'FTA', 'PTS': 'PTS', 'Off Reb': 'Off Reb',
+               'ORebs': 'Off Reb', 'Def Reb': 'Def Reb',
+               'DRebs': 'Def Reb', 'BLK': 'BLKS', 'BLKS': 'BLKS',
+               'ST': 'ST', 'STL': 'ST', 'Player': 'Player',
+               'AST': 'AST', 'TO': 'TO', 'Fouls': 'Fouls',
+               'Team': 'Team', 'game_id': 'game_id', 'Time': 'Time'}
 
-    def __init__(self, conn):
+    def __init__(self):
         """
         INPUT: NCAAScraper
         OUTPUT: None
@@ -49,18 +61,9 @@ class NCAAScraper(object):
         from stats.ncaa.org, process that data, and insert it into a 
         PostgreSQL database.
         """
-        self.conn = conn
+        self.conn = DB.conn
         self.cur = self.conn.cursor()
         self.page_opener = Page_Opener()
-        self.col_map = {'Min': 'Min', 'MP': 'Min', 'Tot Reb': 'Tot Reb',
-                        'Pos': 'Pos', 'FGM': 'FGM', 'FGA': 'FGA', 
-                        '3FG': '3FG', '3FGA': '3FGA','FT': 'FT', 
-                        'FTA': 'FTA', 'PTS': 'PTS', 'Off Reb': 'Off Reb',
-                        'ORebs': 'Off Reb', 'Def Reb': 'Def Reb', 
-                        'DRebs': 'Def Reb', 'BLK': 'BLKS', 'BLKS': 'BLKS',
-                        'ST': 'ST', 'STL': 'ST', 'Player': 'Player',
-                        'AST': 'AST', 'TO': 'TO', 'Fouls': 'Fouls',
-                        'Team': 'Team', 'game_id': 'game_id', 'Time': 'Time'}
 
     def pbp_link(self, game_id):
         return self.pbp_link_base + str(int(game_id))
@@ -291,8 +294,9 @@ class NCAAScraper(object):
 
         table is a dataframe containing raw box stats
         """
+        table.dropna(axis=0, subset=['Player'], inplace=True)
         # minutes column is in form MM:00
-        table['Min'] = table['Min'].map(lambda x: x.replace(':00', ''))
+        table['Min'] = table['Min'].map(lambda x: x.replace(':00', '') if ':00' in str(x) else '0')
         format_cols = [col for col in table.columns \
                        if col not in {'Player', 'Pos', 'Team', 'game_id'}]
         
@@ -302,10 +306,11 @@ class NCAAScraper(object):
         for col in format_cols:
             # need to remove garbage characters if column type is object
             if table[col].dtype == np.object:
-                table[col] = table[col].map(lambda x: re.sub(rx, '0', x)).astype(float)
+                table[col] = table[col].map(lambda x: re.sub(rx, '', str(x))).astype(float)
 
-        table['first_name'] = table.Player.map(lambda x: x.split(',')[-1].strip())
-        table['last_name'] = table.Player.map(lambda x: x.split(',')[0].strip() if ',' in x else '')
+        table['first_name'] = table.Player.map(lambda x: str(x).split(',')[-1].strip())
+        table['last_name'] = table.Player.map(lambda x: str(x).split(',')[0].strip() if ',' in str(x) else '')
+
         return table
 
     def sql_convert(self, values):
@@ -329,7 +334,7 @@ class NCAAScraper(object):
     def rename_box_table(self, table):
         """Map all columns to the same name"""
 
-        d = {col: self.col_map[col] for col in table.columns}
+        d = {col: NCAAScraper.col_map[col] for col in table.columns}
         table = table.rename(columns=d)
 
         return table
@@ -434,10 +439,22 @@ class NCAAScraper(object):
 
         self.conn.commit()
 
+    def continuous_scrape(self, scrape_function):
+        for i in xrange(500):
+            print '*'*30
+            print 'iteration: %s' % i
+            print '*'*30
+            games = self.get_games_to_scrape(2012, 'box', 20)
+            scrape_function(games)
+
 if __name__ == '__main__':
-    conn = psycopg2.connect(database="sethhendrickson", user="sethhendrickson",
-                            password="abc123", host="localhost", port="5432")
-    scraper = NCAAScraper(conn)
-    link = 'http://stats.ncaa.org/game/box_score/3545511'
-    games = scraper.get_games_to_scrape(2015, 'box', 1000)
-    scraper.scrape_box(games)
+    scraper = NCAAScraper()
+    # games = scraper.get_games_to_scrape(2014, 'box', 500)
+    # scraper.scrape_box(games)
+    scraper.continuous_scrape(scraper.scrape_box)
+    # url = 'http://stats.ncaa.org/game/box_score/190465'
+    # soup = scraper.page_opener.open_and_soup(url)
+    # htable, table1, table2 = scraper.get_box_stats('http://stats.ncaa.org/game/box_score/190465')
+
+
+
