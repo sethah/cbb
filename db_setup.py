@@ -96,7 +96,9 @@ def create_seeds(cur):
             )
         """
     cur.execute(q)
+"""
 
+"""
 def create_ncaa_games(cur):
     q = """ CREATE TABLE games_ncaa
             (
@@ -106,13 +108,30 @@ def create_ncaa_games(cur):
             home_score INT,
             away_score INT,
             neutral BOOLEAN,
+            neutral_site TEXT,
             home_outcome BOOLEAN,
             numot INT,
-            box_link TEXT,
-            pbp_link TEXT,
             game_id INT,
             opp_string TEXT,
-            UNIQUE (game_id)
+            UNIQUE (game_id),
+            )
+        """
+    cur.execute(q)
+def create_ncaa_games_test(cur):
+    q = """ CREATE TABLE games_test
+            (
+            dt DATE    NOT NULL,
+            hteam_id INT,
+            ateam_id INT,
+            home_score INT,
+            away_score INT,
+            neutral BOOLEAN,
+            neutral_site TEXT,
+            home_outcome BOOLEAN,
+            numot INT,
+            game_id INT,
+            opp_string TEXT,
+            UNIQUE (game_id),
             )
         """
     cur.execute(q)
