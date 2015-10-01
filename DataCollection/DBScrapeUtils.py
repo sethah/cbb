@@ -1,12 +1,59 @@
 import psycopg2
 import pandas as pd
 import numpy as np
-from DataCollection.Crawlers.stats.ScrapeUtils import ScheduleScraper
+
+from DataCollection.NCAAStatsUtil import NCAAStatsUtil as ncaa_util
+
 
 CONN = psycopg2.connect(database="cbb", user="sethhendrickson",
                         password="abc123", host="localhost", port="5432")
 CUR = CONN.cursor()
 ALL_YEARS = range(2009, 2015)
+TABLE_NAMES_MAP = {'box': 'box_test', 'pbp': 'raw_pbp'}
+
+def insert_box_stats(box_table):
+    """
+    INPUT: NCAAScraper
+    OUTPUT: None
+
+    Scrape, format, and store box data
+    """
+
+    q =  """ INSERT INTO box_test (game_id, team, first_name, last_name,
+            pos, min, fgm, fga, tpm, tpa, ftm, fta, pts, oreb, dreb, reb,
+            ast, turnover, stl, blk, pf) VALUES (%s, %s, %s, %s, %s, %s, %s,
+            %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)"""
+    vals = sql_convert(box_table.values)
+    try:
+        CUR.executemany(q, vals)
+        CONN.commit()
+    except:
+        print vals
+        CONN.rollback()
+
+def get_games_to_scrape(year, from_table='box', num_games=500):
+    if from_table == 'box':
+        table = TABLE_NAMES_MAP.get(from_table)
+    else:
+        table = TABLE_NAMES_MAP.get(from_table)
+    assert table, "From table must be in %s" % TABLE_NAMES_MAP.keys()
+
+    q = """ SELECT game_id
+            FROM games_test
+            WHERE game_id NOT IN
+                (SELECT DISTINCT(game_id) FROM ncaa_box)
+            AND game_id IS NOT NULL
+            AND game_id NOT IN (SELECT game_id FROM url_errors)
+            AND EXTRACT(YEAR FROM dt)={year}
+            ORDER BY DT DESC
+            LIMIT {num_games}
+        """.format(table=table, year=year, num_games=num_games,
+                   check_link=from_table)
+    print q
+    CUR.execute(q)
+    results = CUR.fetchall()
+    results = [ncaa_util.stats_link(x[0], from_table) for x in results]
+    return results
 
 def get_team_pages(year=None):
     if year is not None:
@@ -19,8 +66,8 @@ def get_team_pages(year=None):
     results = CUR.fetchall()
     teams = [result[0] for result in results]
     urls = []
-    for year in range(2009, 2015):
-        year_code = ScheduleScraper.convert_ncaa_year_code(year)
+    for year in years:
+        year_code = ncaa_util.convert_ncaa_year_code(year)
         urls += ['http://stats.ncaa.org/team/index/%s?org_id=%s' % (year_code, team) for team in teams]
 
 def sql_convert(values):
@@ -39,6 +86,9 @@ def sql_convert(values):
                     values[i][j] = None
             elif values[i][j] == 'nan':
                 values[i][j] = None
+            elif type(values[i][j]) == np.float64:
+                if np.isnan(values[i][j]):
+                    values[i][j] = None
     return values
 
 def get_existing_games():
@@ -55,7 +105,7 @@ def get_unplayed():
 
 def insert_missing(scraped_df):
     existing1 = get_existing_games()
-    existing2 =existing1.rename(columns={'hteam_id': 'ateam_id', 'ateam_id': 'hteam_id'})
+    existing2 = existing1.rename(columns={'hteam_id': 'ateam_id', 'ateam_id': 'hteam_id'})
     existing = pd.concat([existing1, existing2], axis=0)
     merged = scraped_df.merge(existing, how='left', on=['dt', 'hteam_id', 'ateam_id'])
     missing = merged[pd.isnull(merged.home_outcome_y)]

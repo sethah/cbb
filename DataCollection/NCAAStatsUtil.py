@@ -1,9 +1,26 @@
 import re
+import string
+
 
 class NCAAStatsUtil(object):
 
     # static variables
     stats_ncaa_year_map = {10440: 2010, 10260: 2009, 10740: 2011, 11220: 2012, 11540: 2013, 12020: 2014}
+    box_link_base = 'http://stats.ncaa.org/game/box_score/'
+    pbp_link_base = 'http://stats.ncaa.org/game/play_by_play/'
+    box_columns = ['game_id', 'Team', 'first_name', 'last_name',
+                   'Pos','Min','FGM', 'FGA', '3FG', '3FGA', 'FT', 'FTA',
+                   'PTS', 'Off Reb', 'Def Reb', 'Tot Reb', 'AST', 'TO', 'ST',
+                   'BLKS', 'Fouls']
+    col_map = {'Min': 'Min', 'MP': 'Min', 'Tot Reb': 'Tot Reb',
+               'Pos': 'Pos', 'FGM': 'FGM', 'FGA': 'FGA',
+               '3FG': '3FG', '3FGA': '3FGA','FT': 'FT',
+               'FTA': 'FTA', 'PTS': 'PTS', 'Off Reb': 'Off Reb',
+               'ORebs': 'Off Reb', 'Def Reb': 'Def Reb',
+               'DRebs': 'Def Reb', 'BLK': 'BLKS', 'BLKS': 'BLKS',
+               'ST': 'ST', 'STL': 'ST', 'Player': 'Player',
+               'AST': 'AST', 'TO': 'TO', 'Fouls': 'Fouls',
+               'Team': 'Team', 'game_id': 'game_id', 'Time': 'Time'}
 
     @staticmethod
     def convert_ncaa_year_code(val):
@@ -45,7 +62,7 @@ class NCAAStatsUtil(object):
             return None, None, None, None
         s = outcome_string.strip()
         outcome = s[0]
-        assert(outcome in {'W', 'L'}, "unknown outcome: %s" % outcome)
+        assert outcome in {'W', 'L'}, "unknown outcome: %s" % outcome
 
         s = s[1:]
         if 'OT' in s:
@@ -56,7 +73,7 @@ class NCAAStatsUtil(object):
             num_ot = 0
 
         scores = s.split('-')
-        assert(len(scores) == 2, "bad outcome string: %s" % s)
+        assert len(scores) == 2, "bad outcome string: %s" % s
         score, opp_score = scores[0].strip(), scores[1].strip()
 
         return outcome, int(score), int(opp_score), num_ot
@@ -82,10 +99,37 @@ class NCAAStatsUtil(object):
     def parse_game_link(url):
         # TODO: use regex
         splits1 = url.split('index/')
-        assert(len(splits1) == 2, "bad game link: %s" % url)
+        assert len(splits1) == 2, "bad game link: %s" % url
         splits2 = splits1[1].split('?')
-        assert(len(splits2) == 2, "bad game link: %s" % url)
+        assert len(splits2) == 2, "bad game link: %s" % url
 
         game_id = splits2[0].strip()
 
         return game_id
+
+    @staticmethod
+    def clean_string(s):
+        if type(s) == str or type(s) == unicode:
+            clean = filter(lambda char: char in string.printable, s)
+            return str(clean)
+        else:
+            return str(s)
+
+    @staticmethod
+    def parse_name(full_name):
+        full_name = str(full_name)
+        parts = full_name.split(",")
+        if len(parts) == 2:
+            first_name, last_name = parts[1].strip(), parts[0].strip()
+        else:
+            first_name, last_name = full_name.strip(), ''
+
+        return first_name, last_name
+
+    @staticmethod
+    def parse_stats_link(url):
+        splits = url.split("/")
+        if len(splits) > 0:
+            game_id = splits[-1]
+
+        return int(game_id)
