@@ -19,7 +19,6 @@ class BoxSpider(scrapy.Spider):
     name = "box"
     allowed_domains = ["stats.ncaa.org"]
     start_urls = dbutil.get_games_to_scrape(2013, 'box', 1000)
-    print start_urls
 
     def __init__(self):
         self.data = []
@@ -36,7 +35,6 @@ class BoxSpider(scrapy.Spider):
 
 def spider_closing(spider):
     """Activates on spider closed signal"""
-    # log.msg("Closing reactor", level=log.INFO)
     spider.crawler.stats.set_value('failed_urls', ','.join(spider.failed_urls))
     reactor.stop()
 

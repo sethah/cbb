@@ -3,6 +3,10 @@ import string
 
 
 class NCAAStatsUtil(object):
+    """
+    A collection of functions that handle scraping tasks specific to
+    the stats.ncaa.org domain.
+    """
 
     # static variables
     stats_ncaa_year_map = {10440: 2010, 10260: 2009, 10740: 2011, 11220: 2012, 11540: 2013, 12020: 2014}
@@ -24,6 +28,7 @@ class NCAAStatsUtil(object):
 
     @staticmethod
     def convert_ncaa_year_code(val):
+        """Swap between the stats.ncaa.org year code and the actual year."""
         code_to_year = NCAAStatsUtil.stats_ncaa_year_map
         year_to_code = {v: k for k, v in code_to_year.iteritems()}
         if val in code_to_year:
@@ -35,10 +40,12 @@ class NCAAStatsUtil(object):
 
     @staticmethod
     def all_years():
+        """All current available years for stats.ncaa.org"""
         return [v for k, v in NCAAStatsUtil.stats_ncaa_year_map.iteritems()]
 
     @staticmethod
     def stats_link(game_id, link_type='box'):
+        """Construct box stats and play-by-play stats links from stats.ncaa.org game id"""
         assert link_type in {'box', 'pbp'}, "invalid link type: %s" % link_type
         if link_type == 'box':
             link = 'http://stats.ncaa.org/game/box_score/%s' % game_id
@@ -49,6 +56,7 @@ class NCAAStatsUtil(object):
 
     @staticmethod
     def get_team_id(url):
+        """Extract the stats.ncaa.org team id from a url to the team's page"""
         pattern = "org_id=[0-9]+"
         match = re.search(pattern, s).group()
         if match is not None:
@@ -58,6 +66,7 @@ class NCAAStatsUtil(object):
 
     @staticmethod
     def parse_outcome(outcome_string):
+        """Extract useful parts of an outcome string like 'L 80-82 (2OT)'"""
         if 'W' not in outcome_string and 'L' not in outcome_string:
             return None, None, None, None
         s = outcome_string.strip()
@@ -80,6 +89,7 @@ class NCAAStatsUtil(object):
 
     @staticmethod
     def parse_opp_string(opp_string):
+        """Extract useful parts of the opponent column of a team's schedule"""
         if '@' in opp_string:
             splits = opp_string.split('@')
             # if '@' is first character, then it is not neutral site
@@ -97,6 +107,10 @@ class NCAAStatsUtil(object):
 
     @staticmethod
     def parse_game_link(url):
+        """
+        Extract game id from the game link url
+        Note: the game link url is not the same as the box_score or play_by_play urls
+        """
         # TODO: use regex
         splits1 = url.split('index/')
         assert len(splits1) == 2, "bad game link: %s" % url
@@ -109,6 +123,7 @@ class NCAAStatsUtil(object):
 
     @staticmethod
     def clean_string(s):
+        """Get only printable characters from a string or unicode type"""
         if type(s) == str or type(s) == unicode:
             clean = filter(lambda char: char in string.printable, s)
             return str(clean)
@@ -117,6 +132,7 @@ class NCAAStatsUtil(object):
 
     @staticmethod
     def parse_name(full_name):
+        """Get first and last name from the name column of box stats table"""
         full_name = str(full_name)
         parts = full_name.split(",")
         if len(parts) == 2:
@@ -128,6 +144,7 @@ class NCAAStatsUtil(object):
 
     @staticmethod
     def parse_stats_link(url):
+        """Get game id from the box_score or play_by_play urls"""
         splits = url.split("/")
         if len(splits) > 0:
             game_id = splits[-1]

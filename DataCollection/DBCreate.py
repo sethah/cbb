@@ -3,8 +3,8 @@ import psycopg2
 class DBCreate(object):
 
     @staticmethod
-    def create_games():
-        q = """ CREATE TABLE games_test
+    def create_games(table_name):
+        q = """ CREATE TABLE {table_name}
                 (
                 dt DATE    NOT NULL,
                 hteam_id INT,
@@ -20,4 +20,4 @@ class DBCreate(object):
                 UNIQUE (game_id),
                 UNIQUE (dt, hteam_id, ateam_id)
                 )
-            """
+            """.format(table_name=table_name)

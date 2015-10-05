@@ -2,7 +2,6 @@ from datetime import datetime, date, timedelta
 import pandas as pd
 import numpy as np
 import re
-import string
 
 from DataCollection.NCAAStatsUtil import NCAAStatsUtil as ncaa_util
 
@@ -13,6 +12,13 @@ class ScheduleScraper(object):
 
     @classmethod
     def get_team_schedule(cls, soup, url):
+        """
+        INPUT: BeautifulSoup, string
+        OUTPUT: 2D-Array
+
+        Get a 2D array representation of the team's scheduled games including various
+        information about each game.
+        """
         team_id = ncaa_util.get_team_id(url)
         tables = soup.findAll('table', {'class': 'mytable'})
         if len(tables) > 0:
@@ -34,6 +40,7 @@ class ScheduleScraper(object):
 
     @classmethod
     def _process_schedule_row(cls, row, team_id):
+        """Extract useful information about a game from its row representation"""
         tds = row.findAll('td')
         if len(tds) != 3:
             return None
@@ -69,6 +76,12 @@ class ScheduleScraper(object):
 
     @staticmethod
     def process_score(score, opp_score, loc):
+        """
+        Derive home team and away team from team, opponent, and team location
+        Note: neutral games will default to the current team being home team, though
+              this should not matter since the neutral site information is also
+              captured.
+        """
         if loc == 'A':
             home_score = opp_score
             away_score = score
@@ -83,10 +96,10 @@ class BoxScraper(object):
     @classmethod
     def extract_box_stats(cls, soup, url):
         """
-        INPUT: NCAAScraper, STRING
-        OUTPUT: DATAFRAME, DATAFRAME, DATAFRAME
+        INPUT: BeautifulSoup, STRING
+        OUTPUT: DATAFRAME, DATAFRAME
 
-        Extract html from box stats page and convert to dataframes
+        Extract box stats from html and convert to dataframe
 
         url is a string linking to the box stats page
         """
@@ -114,12 +127,14 @@ class BoxScraper(object):
         table2 = cls.rename_box_table(table2)
         table1 = cls.format_box_table(table1)
         table2 = cls.format_box_table(table2)
+
         box_table = cls._combine_box_tables(table1, table2)
 
         return htable, box_table[ncaa_util.box_columns]
 
     @classmethod
     def _combine_box_tables(cls, table1, table2):
+        """Combine the two teams' box stats into one dataframe"""
         assert table1.shape[1] == table2.shape[1], \
             "table1 ncols = %s did not match table2 ncols = %s" % (table1.shape[1], table2.shape[1])
         return pd.concat([table1, table2])
@@ -127,10 +142,10 @@ class BoxScraper(object):
     @classmethod
     def format_box_table(cls, table):
         """
-        INPUT: NCAAScraper, DATAFRAME
+        INPUT: DATAFRAME
         OUTPUT: DATAFRAME
 
-        Format the box table to prepare for storage
+        Format the box table to prepare for storage by removing unwanted characters, etc...
 
         table is a dataframe containing raw box stats
         """
@@ -149,7 +164,9 @@ class BoxScraper(object):
             # need to remove garbage characters if column type is object
             if table[col].dtype == np.object:
                 table[col] = table[col].map(lambda x: re.sub(rx, '', ncaa_util.clean_string(x)))
-                table[table[col] == ''] = np.nan
+                # we are trying to handle case where entire column is empty
+                table[col] = table[col].map(lambda x: np.nan if x == '' else x)
+                # converts empty strings to nans, but does nothing when entire column is empty strings
                 table[col] = table[col].convert_objects(convert_numeric=True)
 
         table['first_name'] = table.Player.map(lambda x: ncaa_util.parse_name(x)[0])

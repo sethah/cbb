@@ -32,6 +32,7 @@ def insert_box_stats(box_table):
         CONN.rollback()
 
 def get_games_to_scrape(year, from_table='box', num_games=500):
+    """Get a list of games that haven't been scraped"""
     if from_table == 'box':
         table = TABLE_NAMES_MAP.get(from_table)
     else:
@@ -41,7 +42,7 @@ def get_games_to_scrape(year, from_table='box', num_games=500):
     q = """ SELECT game_id
             FROM games_test
             WHERE game_id NOT IN
-                (SELECT DISTINCT(game_id) FROM ncaa_box)
+                (SELECT DISTINCT(game_id) FROM box_test)
             AND game_id IS NOT NULL
             AND game_id NOT IN (SELECT game_id FROM url_errors)
             AND EXTRACT(YEAR FROM dt)={year}
@@ -56,6 +57,7 @@ def get_games_to_scrape(year, from_table='box', num_games=500):
     return results
 
 def get_team_pages(year=None):
+    """Generate a list of team page urls for given year"""
     if year is not None:
         years = range(year, year + 1)
     else:
@@ -92,18 +94,21 @@ def sql_convert(values):
     return values
 
 def get_existing_games():
+    """Return all existing games from the games database"""
     existing = pd.read_sql("SELECT * FROM games_test", CONN)
     existing['dt'] = existing['dt'].map(lambda x: str(x))
 
     return existing
 
 def get_unplayed():
+    """Return a list of games that don't have game ids from games db"""
     unplayed = pd.read_sql("SELECT * FROM games_test WHERE game_id IS NULL", CONN)
     unplayed['dt'] = unplayed['dt'].map(lambda x: str(x))
 
     return unplayed
 
 def insert_missing(scraped_df):
+    """From scraped games, insert only ones that are not in the database already"""
     existing1 = get_existing_games()
     existing2 = existing1.rename(columns={'hteam_id': 'ateam_id', 'ateam_id': 'hteam_id'})
     existing = pd.concat([existing1, existing2], axis=0)
@@ -124,6 +129,7 @@ def insert_missing(scraped_df):
         raise
 
 def update_unplayed(scraped_df):
+    """Update game entries in the database that were previously unplayed"""
     unplayed = get_unplayed()
     to_update = scraped_df.merge(unplayed[['dt', 'hteam_id', 'ateam_id']], on=['dt', 'hteam_id', 'ateam_id'])
     q = """ UPDATE games_test
@@ -147,7 +153,27 @@ def update_unplayed(scraped_df):
         CONN.rollback()
         raise
 
+def insert_pbp_data(values):
+    values = sql_convert(values)
+    q =  """ INSERT INTO pbp
+                (game_id, pbp_id, team, teamid, time, first_name, last_name,
+                 play, hscore, ascore, possession, poss_time_full,
+                 poss_time, home_fouls, away_fouls, second_chance,
+                 timeout_pts, turnover_pts, and_one, blocked, stolen,
+                 assisted, assist_play, recipient, charge)
+             VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
+                     %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+         """
+
+    try:
+        CUR.executemany(q, values)
+        CONN.commit()
+    except:
+        CONN.rollback()
+        raise
+
 def update_games_table():
+    """Routine to update the games table from a list of scraped games"""
     column_names = ['game_id', 'dt', 'hteam_id', 'ateam_id', 'opp_string', 'home_outcome',
                     'neutral_site', 'neutral', 'numot', 'home_score', 'away_score']
     scraped = pd.read_csv("output.csv", header=None, names=column_names)
@@ -155,5 +181,3 @@ def update_games_table():
     update_unplayed(scraped)
     insert_missing(scraped)
 
-if __name__ == "__main__":
-    update_games_table()

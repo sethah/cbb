@@ -2,6 +2,7 @@ import pandas as pd
 import numpy as np
 
 from DataCollection import DB
+import DataCollection.DBScrapeUtils as dbutil
 
 
 class PBP(object):
@@ -47,9 +48,10 @@ class PBP(object):
         self.data = self.df.values
         self.col_index = {col: idx for idx, col in enumerate(self.df.columns)}
 
-    def point_value(self, play):
+    @staticmethod
+    def point_value(play):
         """
-        INPUT: PBP, STRING
+        INPUT: STRING
         OUTPUT: TUPLE
 
         Return a tuple containing the point value and worth of a play.
@@ -177,7 +179,7 @@ class PBP(object):
                         if row[self.col_index['and_one']] > 0:
                             d[flag][idx] = row[self.col_index['and_one']]
                         else:
-                            d[flag][idx] = self.point_value(play)[1]
+                            d[flag][idx] = PBP.point_value(play)[1]
                         flags[flag] = False
             elif 'FT' in play:
                 for flag in flags:
@@ -236,7 +238,7 @@ class PBP(object):
 
             if play in {'LUM', 'DM', 'JM', 'TIM', 'TPM'}:
                 d[teamid]['shot_index'] = idx
-                d[teamid]['shot_worth'] = self.point_value(play)
+                d[teamid]['shot_worth'] = PBP.point_value(play)
             elif 'FT' in play:
                 d[teamid]['ft_count'] += 1
                 d[teamid]['ft_total'] += 1
@@ -367,7 +369,7 @@ class PBP(object):
             if charge_index is not None:
                 charge_indices.append(charge_index)
             if 'FT' in row[self.col_index['play']]:
-                fts[row[self.col_index['teamid']]]['total'] += self.point_value(row[self.col_index['play']])[1]
+                fts[row[self.col_index['teamid']]]['total'] += PBP.point_value(row[self.col_index['play']])[1]
                 fts[row[self.col_index['teamid']]]['count'] += 1
                 fts[row[self.col_index['teamid']]]['indices'].append(idx)
 
@@ -395,8 +397,7 @@ class PBP(object):
         """
         if idx >= self.data.shape[0] - 1:
             return False 
-        elif self.data[idx][self.col_index['possession']] != \
-            self.data[idx + 1][self.col_index['possession']]:
+        elif self.data[idx][self.col_index['possession']] != self.data[idx + 1][self.col_index['possession']]:
             return True
         else:
             return False
@@ -452,33 +453,6 @@ class PBP(object):
         self.poss_time_full()
         self.sql_convert()
         return self.df
-
-def data_convert(values):
-    for i in xrange(len(values)):
-        for j in xrange(len(values[0])):
-            if type(values[i][j]) == float:
-                if values[i][j].is_integer():
-                    values[i][j] = int(values[i][j])
-                elif np.isnan(values[i][j]):
-                    values[i][j] = None
-            elif values[i][j] == 'nan':
-                values[i][j] = None
-    return values
-
-def insert_data(values, conn, cur):
-    values = data_convert(values)
-    q =  """ INSERT INTO pbp
-                (game_id, pbp_id, team, teamid, time, first_name, last_name,
-                 play, hscore, ascore, possession, poss_time_full,
-                 poss_time, home_fouls, away_fouls, second_chance,
-                 timeout_pts, turnover_pts, and_one, blocked, stolen,
-                 assisted, assist_play, recipient, charge)
-             VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
-                     %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-         """
-
-    cur.executemany(q, values)
-    conn.commit()
 
 
 if __name__ == '__main__':
