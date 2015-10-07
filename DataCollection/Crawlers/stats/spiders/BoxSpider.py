@@ -3,11 +3,10 @@ import os
 
 import scrapy
 from bs4 import BeautifulSoup
-import psycopg2
 from twisted.internet import reactor
 
 print os.environ['PYTHONPATH'].split(os.pathsep)
-from DataCollection.ScrapeUtils import ScheduleScraper, BoxScraper
+from DataCollection.ScrapeUtils import BoxScraper
 import DataCollection.DBScrapeUtils as dbutil
 from scrapy.crawler import Crawler
 from scrapy.settings import Settings
@@ -18,7 +17,7 @@ urls = ["http://stats.ncaa.org/game/box_score/170096"]
 class BoxSpider(scrapy.Spider):
     name = "box"
     allowed_domains = ["stats.ncaa.org"]
-    start_urls = dbutil.get_games_to_scrape(2013, 'box', 1000)
+    start_urls = dbutil.get_games_to_scrape(from_table='box', num_games=10000)
 
     def __init__(self):
         self.data = []

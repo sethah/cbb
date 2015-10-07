@@ -3,10 +3,10 @@ import pandas as pd
 import numpy as np
 
 from DataCollection.NCAAStatsUtil import NCAAStatsUtil as ncaa_util
+from DataCollection.DB import DB
 
 
-CONN = psycopg2.connect(database="cbb", user="sethhendrickson",
-                        password="abc123", host="localhost", port="5432")
+CONN = DB.conn
 CUR = CONN.cursor()
 ALL_YEARS = range(2009, 2015)
 TABLE_NAMES_MAP = {'box': 'box_test', 'pbp': 'raw_pbp'}
@@ -31,7 +31,7 @@ def insert_box_stats(box_table):
         print vals
         CONN.rollback()
 
-def get_games_to_scrape(year, from_table='box', num_games=500):
+def get_games_to_scrape(year=None, from_table='box', num_games=500):
     """Get a list of games that haven't been scraped"""
     if from_table == 'box':
         table = TABLE_NAMES_MAP.get(from_table)
@@ -39,16 +39,21 @@ def get_games_to_scrape(year, from_table='box', num_games=500):
         table = TABLE_NAMES_MAP.get(from_table)
     assert table, "From table must be in %s" % TABLE_NAMES_MAP.keys()
 
+    if year is not None:
+        year_filter = "AND EXTRACT(YEAR FROM dt)={year}".format(year=year)
+    else:
+        year_filter = ""
+
     q = """ SELECT game_id
             FROM games_test
             WHERE game_id NOT IN
                 (SELECT DISTINCT(game_id) FROM box_test)
             AND game_id IS NOT NULL
             AND game_id NOT IN (SELECT game_id FROM url_errors)
-            AND EXTRACT(YEAR FROM dt)={year}
+            {year_filter}
             ORDER BY DT DESC
             LIMIT {num_games}
-        """.format(table=table, year=year, num_games=num_games,
+        """.format(table=table, year_filter=year_filter, num_games=num_games,
                    check_link=from_table)
     print q
     CUR.execute(q)

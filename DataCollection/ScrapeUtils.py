@@ -2,6 +2,7 @@ from datetime import datetime, date, timedelta
 import pandas as pd
 import numpy as np
 import re
+from collections import defaultdict
 
 from DataCollection.NCAAStatsUtil import NCAAStatsUtil as ncaa_util
 
@@ -183,6 +184,87 @@ class BoxScraper(object):
 
         return table
 
+
+class PBPScraper(object):
+
+    @classmethod
+    def extract_pbp_stats(cls, soup):
+        """
+        INPUT: NCAAScraper, STRING
+        OUTPUT: DATAFRAME, DATAFRAME
+
+        Extract the pbp data and the game summary table from the pbp
+        data page for a game.
+
+        url is a string which links to the pbp page
+        """
+        html_tables = soup.findAll('table', {'class': 'mytable'})
+        htable = pd.read_html(str(html_tables[0]), header=0)[0]
+        table = pd.read_html(str(html_tables[1]), skiprows=0, header=0, infer_types=False)[0]
+        for i in xrange(2, len(html_tables)):
+            table = pd.concat([table, pd.read_html(str(html_tables[i]), skiprows=0, header=0, infer_types=False)[0]])
+
+        table['game_id'] = ncaa_util.parse_stats_link(url)
+        table = cls.format_pbp_stats(table, htable)
+
+        return htable, table
+
+    @classmethod
+    def format_pbp_stats(cls, table, htable):
+        """
+        INPUT: NCAAScraper, DATAFRAME, DATAFRAME
+        OUTPUT: DATAFRAME
+
+        Convert the raw tables into tabular data for storage.
+
+        table is a dataframe containing raw pbp data
+        htable is a dataframe containing game summary info
+        """
+        table.columns = ['Time', 'team1', 'Score', 'team2', 'game_id']
+        d = defaultdict(list)
+        half = 0
+        for i, row in table.iterrows():
+            if row.Score == 'nan':
+                half += 1
+                continue
+            if row.team1 == 'nan':
+                play_string = row.team2
+                d['teamid'].append(1)
+            else:
+                play_string = row.team1
+                d['teamid'].append(0)
+            play, first_name, last_name = ncaa_util.split_play(play_string)
+            play = ncaa_util.string_to_stat(play)
+
+            t = ncaa_util.time_to_dec(row.Time, half)
+
+            ascore, hscore = row.Score.split('-')
+            d['hscore'].append(hscore)
+            d['ascore'].append(ascore)
+
+            d['first_name'].append(first_name)
+            d['last_name'].append(last_name)
+
+            d['play'].append(play)
+
+            d['time'].append(t)
+
+        # if the score is nan then it is a end of half row
+        cond1 = table.Score != 'nan'
+
+        table = table[cond1]
+        for col in d:
+            table[col] = d[col]
+
+        cond2 = table.time > 0
+        table = table[cond2]
+        team1 = htable.iloc[0, 0]
+        team2 = htable.iloc[1, 0]
+        table['team'] = table.teamid.map(lambda x: team1 if x==0 else team2)
+
+        keep_cols = ['game_id', 'time', 'teamid', 'team', 'first_name',
+                     'last_name', 'play', 'hscore', 'ascore']
+        return table[keep_cols]
 
 if __name__ == "__main__":
     urls = ["http://stats.ncaa.org/game/box_score/1460512"]
