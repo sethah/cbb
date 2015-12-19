@@ -4,7 +4,10 @@ import numpy as np
 import re
 from collections import defaultdict
 
+from DB import DB
+
 from DataCollection.NCAAStatsUtil import NCAAStatsUtil as ncaa_util
+from DataCollection.DBScrapeUtils import sql_convert
 
 class ScheduleScraper(object):
 
@@ -266,12 +269,125 @@ class PBPScraper(object):
                      'last_name', 'play', 'hscore', 'ascore']
         return table[keep_cols]
 
+class DivisionOneScraper(object):
+
+    @classmethod
+    def get_urls(cls, years):
+        base = 'http://stats.ncaa.org/team/inst_team_list?'
+        urls = []
+        for year in years:
+            urls.append('{base}academic_year={year}&division=1&sport_code=MBB'.format(base=base,
+                                                                             year=year))
+        return urls
+
+    @classmethod
+    def extract_teams(cls, soup):
+        atags = soup.findAll('a')
+        atags = filter(lambda a: 'team/index' in a['href'], atags)
+        ncaaids = [ncaa_util.get_team_id(a['href']) for a in atags]
+        ncaa_names = [a.get_text().strip() for a in atags]
+
+        assert len(ncaaids) == len(ncaa_names)
+
+        return ncaaids, ncaa_names
+
+    @classmethod
+    def insert_data(cls, df):
+        existing_data = pd.read_sql("SELECT * FROM division_one", DB.conn)
+        merged = df.merge(existing_data, how='left', left_on=["teamid", "year"], right_on=["ncaaid", "year"])
+        missing = merged[pd.isnull(merged.ncaaid)]
+        vals = sql_convert(missing[['teamid', 'year']].values)
+        cur = DB.conn.cursor()
+        q =  """ INSERT INTO division_one
+                    (ncaaid, year)
+                 VALUES (%s, %s)
+             """
+        try:
+            cur.executemany(q, vals)
+            DB.conn.commit()
+        except:
+            DB.conn.rollback()
+            raise
+
+class KenpomScraper(object):
+
+    @classmethod
+    def get_urls(cls, years):
+        base = "http://kenpom.com/index.php?y="
+        urls = []
+        for year in years:
+            urls.append('{base}{year}'.format(base=base, year=year))
+        return urls
+
+    @classmethod
+    def get_year(cls, url):
+        pattern = "y=[0-9]+"
+        substring = re.search(pattern, url).group()
+        if substring is not None:
+            return int(substring.split("y=")[-1])
+        else:
+            raise ValueError, "couldn't find the year"
+
+
+    @classmethod
+    def extract_teams(cls, soup, year):
+        table = soup.find('table', {'id': 'ratings-table'})
+        # tbodys = soup.findAll()
+        def filter_tr(tr):
+            tds = tr.findAll('td')
+            if len(tds) > 0:
+                if str(tds[0].get_text()).isdigit():
+                    return True
+            return False
+        trs = filter(filter_tr, soup.findAll('tr'))
+        theader = '<table>'
+        tbody = "".join([str(tr) for tr in trs])
+        ttail = '</table>'
+        table = theader + tbody + ttail
+        columns = ['rank', 'team', 'conf', 'wl', 'pyth', 'adjo', 'adjo_rank',
+                   'adjd', 'adjd_rank', 'adjt', 'adjt_rank', 'luck', 'luck_rank',
+                   'sos_pyth', 'sos_pyth_rank', 'sos_opp_o', 'sos_opp_o_rank',
+                   'sos_opp_d', 'sos_opp_d_rank', 'ncsos', 'ncsos_rank']
+        df = pd.read_html(table, infer_types=False)[0]
+        def clean_team(s):
+            s = s.replace(";", "")
+            pattern = '( [0-9]+)'
+            splits = re.split(pattern, s)
+            if len(splits) == 3:
+                return splits[0].strip()
+            else:
+                return s
+        df.columns = columns
+        df['team'] = df.team.map(lambda team: clean_team(team))
+        df['wins'] = df.wl.map(lambda x: int(x.split('-')[0]))
+        df['losses'] = df.wl.map(lambda x: int(x.split('-')[1]))
+        df['year'] = year
+        return df
+
+    @classmethod
+    def insert_data(cls, df):
+        cur = DB.conn.cursor()
+        years = np.unique(df.year.values)
+        # delete the data for every year we are trying to update
+        for year in years:
+            q = "DELETE FROM kenpom_ranks WHERE year=%s" % int(year)
+            cur.execute(q)
+
+        cols_to_insert = ['year', 'rank', 'wins', 'losses', 'team', 'conf',
+                          'pyth', 'adjo', 'adjd', 'adjt', 'luck', 'sos_pyth',
+                          'sos_opp_o', 'sos_opp_d', 'ncsos']
+        vals = sql_convert(df[cols_to_insert].values)
+        column_insert = '(' + ", ".join(cols_to_insert) + ')'
+        vals_insert = '(' + ", ".join(["%s"] * len(cols_to_insert)) + ')'
+        q = """ INSERT INTO kenpom_ranks %s VALUES %s""" % (column_insert, vals_insert)
+        try:
+            cur.executemany(q, vals)
+            DB.conn.commit()
+        except Exception, e:
+            print e
+            DB.conn.rollback()
+            raise
+
+
 if __name__ == "__main__":
-    urls = ["http://stats.ncaa.org/game/box_score/1460512"]
-    url = urls[0]
-    import requests
-    from bs4 import BeautifulSoup
-    response = requests.get(url)
-    soup = BeautifulSoup(response.content, "html.parser")
-    print response.status_code
-    htable, box_table = BoxScraper.extract_box_stats(soup, url)
+    pass
