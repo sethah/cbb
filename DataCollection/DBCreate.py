@@ -1,15 +1,4 @@
-from DB import DB
-
-TABLES = {"games": "games",
-          "box": "box_stats",
-          "pbp": "pbp_stats",
-          "raw_pbp": "raw_pbp",
-          "division_one": "division_one",
-          "teams": "teams",
-          "kenpom_ranks": "kenpom_ranks"}
-
-def get_table_name(table):
-    return TABLES.get(table)
+import DB
 
 def create_games():
     q = """ CREATE TABLE {games}
@@ -28,14 +17,15 @@ def create_games():
             UNIQUE (game_id),
             UNIQUE (dt, hteam_id, ateam_id)
             )
-        """.format(games=get_table_name("games"))
+        """.format(games=DB.TABLES.get("games"))
     return q
 
 def create_ncaa_box():
     q = """ CREATE TABLE {box}
             (
-            game_id INT REFERENCES {games}(game_id) NOT NULL,
+            game_id INT REFERENCES games_test(game_id) NOT NULL,
             team TEXT NOT NULL,
+            team_id INT,
             first_name TEXT NOT NULL,
             last_name TEXT,
             pos TEXT,
@@ -57,7 +47,7 @@ def create_ncaa_box():
             pf int
             )
         """.format(box=get_table_name("box"),
-                   games=get_table_name("games"))
+                   games=DB.TABLES.get("games_test"))
     return q
 
 def create_pbp():
@@ -90,9 +80,9 @@ def create_pbp():
             charge BOOLEAN,
             UNIQUE(pbp_id)
             )
-        """.format(pbp=get_table_name("pbp"),
-                   games=get_table_name("games"),
-                   raw_pbp=get_table_name("raw_pbp"))
+        """.format(pbp=DB.TABLES.get("pbp"),
+                   games=DB.TABLES.get("games"),
+                   raw_pbp=DB.TABLES.get("raw_pbp"))
 
     return q
 
@@ -110,8 +100,8 @@ def create_raw_pbp():
         hscore INT,
         ascore INT
         )
-    """.format(raw_pbp=get_table_name("raw_pbp"),
-               games=get_table_name("games"))
+    """.format(raw_pbp=DB.TABLES.get("raw_pbp"),
+               games=DB.TABLES.get("games"))
 
     return q
 
@@ -123,8 +113,8 @@ def create_division_one():
             year INT NOT NULL,
             UNIQUE(ncaaid, year)
             )
-        """.format(division_one=TABLES.get("division_one"),
-                   teams=TABLES.get("teams"))
+        """.format(division_one=DB.TABLES.get.get("division_one"),
+                   teams=DB.TABLES.get.get("teams"))
     return q
 
 def create_kenpom_ranks():
@@ -148,13 +138,12 @@ def create_kenpom_ranks():
             year INT NOT NULL,
             UNIQUE(team, year)
             )
-        """.format(kenpom_ranks=TABLES.get("kenpom_ranks"))
+        """.format(kenpom_ranks=DB.TABLES.get.get("kenpom_ranks"))
     return q
 
 def add_table(qfunc):
     q = qfunc()
     cur = DB.conn.cursor()
-    print q
     try:
         cur.execute(q)
         DB.conn.commit()

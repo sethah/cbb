@@ -1,21 +1,32 @@
-from datetime import datetime, date, timedelta
+from datetime import datetime
 import pandas as pd
 import numpy as np
 import re
 from collections import defaultdict
 
-from DB import DB
+import DB
 
-from DataCollection.NCAAStatsUtil import NCAAStatsUtil as ncaa_util
+import org_ncaa
+import org_ncaa.scrape as nscr
 from DataCollection.DBScrapeUtils import sql_convert
 
 class ScheduleScraper(object):
 
-    def __init__(self):
-        pass
+    @staticmethod
+    def get_urls(years=None):
+        base_url = 'http://stats.ncaa.org/team/index/'
+        urls = []
+        if years is None:
+            years = org_ncaa.all_years()
+        for year in years:
+            # get division one teams for the year
+            d1 = pd.read_sql("SELECT ncaaid FROM division_one WHERE year=%s" % year, DB.conn)
+            year_code = org_ncaa.convert_ncaa_year_code(year)
+            urls += [base_url + '%s?org_id=%s' % (year_code, team) for team in d1.ncaaid.values]
+        return urls
 
-    @classmethod
-    def get_team_schedule(cls, soup, url):
+    @staticmethod
+    def get_team_schedule(soup, url):
         """
         INPUT: BeautifulSoup, string
         OUTPUT: 2D-Array
@@ -23,7 +34,7 @@ class ScheduleScraper(object):
         Get a 2D array representation of the team's scheduled games including various
         information about each game.
         """
-        team_id = ncaa_util.get_team_id(url)
+        team_id = nscr.url_to_teamid(url)
         tables = soup.findAll('table', {'class': 'mytable'})
         if len(tables) > 0:
             schedule_table = tables[0]
@@ -36,14 +47,14 @@ class ScheduleScraper(object):
             if idx < 2:
                 continue
 
-            game_info = cls._process_schedule_row(row, team_id)
+            game_info = ScheduleScraper._process_schedule_row(row, team_id)
             if game_info is not None:
                 games.append(game_info)
 
         return games
 
-    @classmethod
-    def _process_schedule_row(cls, row, team_id):
+    @staticmethod
+    def _process_schedule_row(row, team_id):
         """Extract useful information about a game from its row representation"""
         tds = row.findAll('td')
         if len(tds) != 3:
@@ -53,10 +64,10 @@ class ScheduleScraper(object):
         opp_link = tds[1].find('a')
         opp_text = tds[1].get_text()
         if opp_link is not None:
-            opp_id = ncaa_util.get_team_id(opp_link['href'])
+            opp_id = nscr.url_to_teamid(opp_link['href'])
         else:
             opp_id = None
-        opp, neutral_site, loc = ncaa_util.parse_opp_string(opp_text)
+        opp, neutral_site, loc = nscr.parse_opp_string(opp_text)
         if loc == 'A':
             hteam_id = opp_id
             ateam_id = team_id
@@ -68,23 +79,24 @@ class ScheduleScraper(object):
         game_link = tds[2].find('a')
         if game_link is not None:
             game_url = game_link['href']
-            game_id = ncaa_util.parse_link(game_url)
+            game_id = nscr.game_link_to_gameid(game_url)
         else:
             game_id = None
 
-        outcome, score, opp_score, num_ot = ncaa_util.parse_outcome(outcome_string)
-        home_score, away_score, home_outcome = cls.process_score(score, opp_score, loc)
+        outcome, score, opp_score, num_ot = nscr.parse_outcome(outcome_string)
+        home_score, away_score, home_outcome = \
+            ScheduleScraper._process_score(score, opp_score, loc)
 
         return [game_id, game_date, hteam_id, ateam_id, opp, neutral,
                 neutral_site, home_outcome, num_ot, home_score, away_score]
 
     @staticmethod
-    def process_score(score, opp_score, loc):
+    def _process_score(score, opp_score, loc):
         """
         Derive home team and away team from team, opponent, and team location
         Note: neutral games will default to the current team being home team, though
               this should not matter since the neutral site information is also
-              captured.
+              captured separately.
         """
         if loc == 'A':
             home_score = opp_score
@@ -98,6 +110,30 @@ class ScheduleScraper(object):
 class BoxScraper(object):
 
     @classmethod
+    def get_team_ids_from_header(cls, htable):
+        header_rows = htable.findAll('tr')
+        assert len(header_rows) == 3, "bad header"
+        team_ids = []
+        for row in header_rows[1:]:
+            tds = row.findAll('td')
+            if len(tds) > 1:
+                team_cell = tds[0]
+                a = team_cell.find('a')
+                if a is not None:
+                    url = a['href']
+                    team_id = nscr.url_to_teamid(url)
+                else:
+                    team_id = None
+            else:
+                team_id = None
+            team_ids.append(team_id)
+        # print team_ids
+        # header_links = filter(lambda a: 'team/index' in a['href'], htable.findAll('a'))
+        # team_ids = [nscr.url_to_teamid(a['href']) for a in header_links]
+        # print team_ids
+        return team_ids
+
+    @classmethod
     def extract_box_stats(cls, soup, url):
         """
         INPUT: BeautifulSoup, STRING
@@ -108,22 +144,23 @@ class BoxScraper(object):
         url is a string linking to the box stats page
         """
         tables = soup.findAll('table', {'class': 'mytable'})
-        if len(tables) != 3:
-            print 'Incorrect number of tables'
-            return None
+        assert len(tables) == 3, 'Error, only found %s tables' % len(tables)
 
         htable = pd.read_html(str(tables[0]), header=0)[0]
         table1 = pd.read_html(str(tables[1]), skiprows=1, header=0, infer_types=False)[0]
         table2 = pd.read_html(str(tables[2]), skiprows=1, header=0, infer_types=False)[0]
 
+        team1_id, team2_id = cls.get_team_ids_from_header(tables[0])
         team1 = htable.iloc[0, 0]
         team2 = htable.iloc[1, 0]
         table1['Team'] = team1
         table2['Team'] = team2
+        table1['team_id'] = team1_id
+        table2['team_id'] = team2_id
 
         # assign a game_id column with all values equal to game_id
-        table1['game_id'] = ncaa_util.parse_stats_link(url)
-        table2['game_id'] = ncaa_util.parse_stats_link(url)
+        table1['game_id'] = nscr.stats_link_to_gameid(url)
+        table2['game_id'] = nscr.stats_link_to_gameid(url)
 
         # older box stat page versions use different column names so
         # we must map them all to common column names (e.g. MIN vs. Min)
@@ -134,7 +171,7 @@ class BoxScraper(object):
 
         box_table = cls._combine_box_tables(table1, table2)
 
-        return htable, box_table[ncaa_util.box_columns]
+        return htable, box_table[nscr.BOX_COLUMNS]
 
     @classmethod
     def _combine_box_tables(cls, table1, table2):
@@ -156,9 +193,9 @@ class BoxScraper(object):
         table.dropna(axis=0, subset=['Player'], inplace=True)
 
         # minutes column is in form MM:00
-        table['Min'] = table['Min'].map(lambda x: x.replace(':00', '') if ':00' in ncaa_util.clean_string(x) else '0')
+        table['Min'] = table['Min'].map(lambda x: x.replace(':00', '') if ':00' in nscr.clean_string(x) else '0')
 
-        do_not_format = {'Player', 'Pos', 'Team', 'game_id'}
+        do_not_format = {'Player', 'Pos', 'Team', 'game_id', 'team_id'}
         format_cols = filter(lambda col: col not in do_not_format, table.columns)
 
         # remove annoying characters from the cells
@@ -167,14 +204,14 @@ class BoxScraper(object):
         for col in format_cols:
             # need to remove garbage characters if column type is object
             if table[col].dtype == np.object:
-                table[col] = table[col].map(lambda x: re.sub(rx, '', ncaa_util.clean_string(x)))
+                table[col] = table[col].map(lambda x: re.sub(rx, '', nscr.clean_string(x)))
                 # we are trying to handle case where entire column is empty
                 table[col] = table[col].map(lambda x: np.nan if x == '' else x)
                 # converts empty strings to nans, but does nothing when entire column is empty strings
                 table[col] = table[col].convert_objects(convert_numeric=True)
 
-        table['first_name'] = table.Player.map(lambda x: ncaa_util.parse_name(x)[0])
-        table['last_name'] = table.Player.map(lambda x: ncaa_util.parse_name(x)[1])
+        table['first_name'] = table.Player.map(lambda x: nscr.parse_name(x)[0])
+        table['last_name'] = table.Player.map(lambda x: nscr.parse_name(x)[1])
 
         return table
 
@@ -182,7 +219,7 @@ class BoxScraper(object):
     def rename_box_table(cls, table):
         """Map all columns to the same name"""
 
-        d = {col: ncaa_util.col_map[col] for col in table.columns}
+        d = {col: nscr.COL_MAP[col] for col in table.columns}
         table = table.rename(columns=d)
 
         return table
@@ -191,7 +228,7 @@ class BoxScraper(object):
 class PBPScraper(object):
 
     @classmethod
-    def extract_pbp_stats(cls, soup):
+    def extract_pbp_stats(cls, soup, url):
         """
         INPUT: NCAAScraper, STRING
         OUTPUT: DATAFRAME, DATAFRAME
@@ -207,7 +244,7 @@ class PBPScraper(object):
         for i in xrange(2, len(html_tables)):
             table = pd.concat([table, pd.read_html(str(html_tables[i]), skiprows=0, header=0, infer_types=False)[0]])
 
-        table['game_id'] = ncaa_util.parse_stats_link(url)
+        table['game_id'] = nscr.stats_link_to_gameid(url)
         table = cls.format_pbp_stats(table, htable)
 
         return htable, table
@@ -236,10 +273,10 @@ class PBPScraper(object):
             else:
                 play_string = row.team1
                 d['teamid'].append(0)
-            play, first_name, last_name = ncaa_util.split_play(play_string)
-            play = ncaa_util.string_to_stat(play)
+            play, first_name, last_name = nscr.split_play(play_string)
+            play = nscr.string_to_stat(play)
 
-            t = ncaa_util.time_to_dec(row.Time, half)
+            t = nscr.time_to_dec(row.Time, half)
 
             ascore, hscore = row.Score.split('-')
             d['hscore'].append(hscore)
@@ -270,6 +307,7 @@ class PBPScraper(object):
         return table[keep_cols]
 
 class DivisionOneScraper(object):
+    data_file = "/Users/sethhendrickson/cbb/tempd1.csv"
 
     @classmethod
     def get_urls(cls, years):
@@ -284,15 +322,23 @@ class DivisionOneScraper(object):
     def extract_teams(cls, soup):
         atags = soup.findAll('a')
         atags = filter(lambda a: 'team/index' in a['href'], atags)
-        ncaaids = [ncaa_util.get_team_id(a['href']) for a in atags]
+        ncaaids = [nscr.url_to_teamid(a['href']) for a in atags]
         ncaa_names = [a.get_text().strip() for a in atags]
 
         assert len(ncaaids) == len(ncaa_names)
 
         return ncaaids, ncaa_names
 
-    @classmethod
-    def insert_data(cls, df):
+    @staticmethod
+    def insert_data():
+        """
+        Insert missing division one team data.
+
+        Read the scraped data frome `DivisonOneScraper.data_file`
+        and then insert only the data that is not already in the
+        database.
+        """
+        df = pd.read_csv(DivisionOneScraper.data_file)
         existing_data = pd.read_sql("SELECT * FROM division_one", DB.conn)
         merged = df.merge(existing_data, how='left', left_on=["teamid", "year"], right_on=["ncaaid", "year"])
         missing = merged[pd.isnull(merged.ncaaid)]

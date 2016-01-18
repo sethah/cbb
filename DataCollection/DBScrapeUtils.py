@@ -1,15 +1,13 @@
-import psycopg2
 import pandas as pd
 import numpy as np
 
 from DataCollection.NCAAStatsUtil import NCAAStatsUtil as ncaa_util
-from DataCollection.DB import DB
+import DataCollection.DB as DB
 
 
 CONN = DB.conn
 CUR = CONN.cursor()
 ALL_YEARS = range(2009, 2015)
-TABLE_NAMES_MAP = {'box': 'box_test', 'pbp': 'raw_pbp'}
 
 def insert_box_stats(box_table):
     """
@@ -19,43 +17,47 @@ def insert_box_stats(box_table):
     Scrape, format, and store box data
     """
 
-    q =  """ INSERT INTO box_test (game_id, team, first_name, last_name,
+    q = """ INSERT INTO {box} (game_id, team, team_id, first_name, last_name,
             pos, min, fgm, fga, tpm, tpa, ftm, fta, pts, oreb, dreb, reb,
-            ast, turnover, stl, blk, pf) VALUES (%s, %s, %s, %s, %s, %s, %s,
-            %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)"""
+            ast, turnover, stl, blk, pf) VALUES (%s, %s, %s, %s, %s, %s, %s, %s,
+            %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+        """.format(box=DB.TABLES.get('box'))
     vals = sql_convert(box_table.values)
     try:
         CUR.executemany(q, vals)
         CONN.commit()
-    except:
-        print vals
+    except Exception, e:
+        print e
         CONN.rollback()
 
-def get_games_to_scrape(year=None, from_table='box', num_games=500):
+def get_games_to_scrape(year=None, season=None, from_table='box', num_games=500):
     """Get a list of games that haven't been scraped"""
-    if from_table == 'box':
-        table = TABLE_NAMES_MAP.get(from_table)
-    else:
-        table = TABLE_NAMES_MAP.get(from_table)
-    assert table, "From table must be in %s" % TABLE_NAMES_MAP.keys()
+    table = DB.TABLES.get(from_table)
+    assert table, "From table must be in %s" % DB.TABLES.keys()
 
     if year is not None:
         year_filter = "AND EXTRACT(YEAR FROM dt)={year}".format(year=year)
+    elif season is not None:
+        year_filter = \
+            """AND (CASE
+                        WHEN EXTRACT(MONTH FROM dt) <= 6 THEN EXTRACT(YEAR FROM dt)
+                        ELSE EXTRACT(YEAR FROM dt) + 1
+                    END) = {season}""".format(season=season)
     else:
         year_filter = ""
 
     q = """ SELECT game_id
-            FROM games_test
+            FROM {games}
             WHERE game_id NOT IN
-                (SELECT DISTINCT(game_id) FROM box_test)
+                (SELECT DISTINCT(game_id) FROM {box})
             AND game_id IS NOT NULL
             AND game_id NOT IN (SELECT game_id FROM url_errors)
             {year_filter}
             ORDER BY DT DESC
             LIMIT {num_games}
         """.format(table=table, year_filter=year_filter, num_games=num_games,
-                   check_link=from_table)
-    print q
+                   check_link=from_table, games=DB.TABLES.get('games'),
+                   box=DB.TABLES.get('box'))
     CUR.execute(q)
     results = CUR.fetchall()
     results = [ncaa_util.stats_link(x[0], from_table) for x in results]
@@ -107,7 +109,8 @@ def get_existing_games():
 
 def get_unplayed():
     """Return a list of games that don't have game ids from games db"""
-    unplayed = pd.read_sql("SELECT * FROM games_test WHERE game_id IS NULL", CONN)
+    unplayed = pd.read_sql("SELECT * FROM %s WHERE game_id IS NULL"
+                           % DB.TABLES.get('games'), CONN)
     unplayed['dt'] = unplayed['dt'].map(lambda x: str(x))
 
     return unplayed
@@ -136,7 +139,8 @@ def insert_missing(scraped_df):
 def update_unplayed(scraped_df):
     """Update game entries in the database that were previously unplayed"""
     unplayed = get_unplayed()
-    to_update = scraped_df.merge(unplayed[['dt', 'hteam_id', 'ateam_id']], on=['dt', 'hteam_id', 'ateam_id'])
+    to_update = scraped_df.merge(unplayed[['dt', 'hteam_id', 'ateam_id']],
+                                 on=['dt', 'hteam_id', 'ateam_id'])
     q = """ UPDATE games_test
             SET home_score=%s,
                  away_score=%s,
@@ -185,4 +189,27 @@ def update_games_table():
     scraped = scraped.drop_duplicates('game_id')
     update_unplayed(scraped)
     insert_missing(scraped)
+
+def season_query_helper():
+    # sub = """(SELECT
+    #             g.dt,
+    #             CASE
+    #                 WHEN EXTRACT(month from g.dt) <= 6 THEN EXTRACT(year from g.dt)
+    #                 ELSE EXTRACT(year from g.dt) + 1
+    #             END AS season,
+    #             b.*
+    #          FROM box_stats b
+    #          JOIN games_test g
+    #          ON b.game_id = g.game_id)"""
+    # season = """SELECT season, count(distinct(game_id))
+    #             FROM %s AS sub
+    #             GROUP BY season""" % sub
+    extract_season = """(CASE
+                        WHEN EXTRACT(month from dt) <= 6 THEN EXTRACT(year from dt)
+                        ELSE EXTRACT(year from dt) + 1
+                    END)"""
+    q = """SELECT %s AS season, count(%s)
+        FROM games_test
+        GROUP BY season""" % (extract_season, extract_season)
+    q.replace("\n", "")
 

@@ -8,27 +8,20 @@ import scrapy
 from bs4 import BeautifulSoup
 from twisted.internet import reactor
 
-# print os.environ['PYTHONPATH'].split(os.pathsep)
 from DataCollection.ScrapeUtils import DivisionOneScraper
-import DataCollection.DBScrapeUtils as dbutil
+import org_ncaa
 from scrapy.crawler import Crawler
 from scrapy.settings import Settings
 from scrapy import signals
 
-ALL_YEARS = [2010, 2011, 2012, 2013, 2014, 2015]
-# ALL_YEARS = [2010]
-
 class DivisionOneTeamsSpider(scrapy.Spider):
-    name = "box"
     allowed_domains = ["stats.ncaa.org"]
-    start_urls = DivisionOneScraper.get_urls(ALL_YEARS)
-    print start_urls
+    start_urls = DivisionOneScraper.get_urls(org_ncaa.all_years())
 
     def __init__(self):
         self.data = []
         self.failed_urls = []
         self.items = []
-        self.teams = {year: None for year in ALL_YEARS}
 
     def parse(self, response):
         if response.status == 404:
@@ -38,9 +31,6 @@ class DivisionOneTeamsSpider(scrapy.Spider):
         year = int(re.search(pattern, response.url).group().split('=')[-1])
         soup = BeautifulSoup(response.body, 'html.parser')
         ncaaids, ncaa_names = DivisionOneScraper.extract_teams(soup)
-        # print ncaaids
-        # self.teams[2010] = {'ids': ncaaids, 'names': ncaa_names,
-        #                     'year': np.ones(ncaaids.shape[0]) * year}
         self.data.append((year, ncaaids, ncaa_names))
 
 def spider_closing(spider):
@@ -58,11 +48,15 @@ def spider_closing(spider):
 
 if __name__ == "__main__":
     spider = DivisionOneTeamsSpider()
-    crawler = Crawler(spider, Settings())
+    settings = Settings()
+    settings.set('DOWNLOAD_DELAY', 0.5)
+    settings.set('COOKIES_ENABLED', False)
+    crawler = Crawler(spider, settings)
     crawler.crawl()
     print "______"
     # stop reactor when spider closes
     crawler.signals.connect(spider_closing, signal=signals.spider_closed)
     reactor.run()
     print crawler.stats.get_stats()
+    DivisionOneScraper.insert_data()
 

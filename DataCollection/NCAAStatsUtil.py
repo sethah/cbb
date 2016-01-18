@@ -12,7 +12,7 @@ class NCAAStatsUtil(object):
     stats_ncaa_year_map = {10440: 2010, 10260: 2009, 10740: 2011, 11220: 2012, 11540: 2013, 12020: 2014}
     box_link_base = 'http://stats.ncaa.org/game/box_score/'
     pbp_link_base = 'http://stats.ncaa.org/game/play_by_play/'
-    box_columns = ['game_id', 'Team', 'first_name', 'last_name',
+    box_columns = ['game_id', 'Team', 'team_id', 'first_name', 'last_name',
                    'Pos','Min','FGM', 'FGA', '3FG', '3FGA', 'FT', 'FTA',
                    'PTS', 'Off Reb', 'Def Reb', 'Tot Reb', 'AST', 'TO', 'ST',
                    'BLKS', 'Fouls']
@@ -24,7 +24,8 @@ class NCAAStatsUtil(object):
                'DRebs': 'Def Reb', 'BLK': 'BLKS', 'BLKS': 'BLKS',
                'ST': 'ST', 'STL': 'ST', 'Player': 'Player',
                'AST': 'AST', 'TO': 'TO', 'Fouls': 'Fouls',
-               'Team': 'Team', 'game_id': 'game_id', 'Time': 'Time'}
+               'Team': 'Team', 'game_id': 'game_id', 'Time': 'Time',
+               'team_id': 'team_id'}
 
     stat_list = ['MADE', 'MISSED', 'REBOUND', 'ASSIST', 'BLOCK',
                  'STEAL', 'TURNOVER', 'FOUL', 'TIMEOUT', 'ENTERS',
@@ -34,6 +35,9 @@ class NCAAStatsUtil(object):
                      'DUNK': 'DM', 'TIP': 'TIM'}
     rebound_code_map = {'OFFENSIVE': 'OREB', 'TEAM': 'TREB',
                         'DEFENSIVE': 'DREB', 'DEADBALL': 'DEADREB'}
+    ALIASES = {101: {'Cal St. Northridge','CSUN'},
+               460: {'UNC Wilmington','UNCW'},
+               660: {'SIU Edwardsville','SIUE'}}
 
     @staticmethod
     def convert_ncaa_year_code(val):

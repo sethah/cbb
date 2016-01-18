@@ -1,23 +1,19 @@
-import csv
-import os
-
 import scrapy
 from bs4 import BeautifulSoup
 from twisted.internet import reactor
 
-print os.environ['PYTHONPATH'].split(os.pathsep)
 from DataCollection.ScrapeUtils import BoxScraper
 import DataCollection.DBScrapeUtils as dbutil
 from scrapy.crawler import Crawler
 from scrapy.settings import Settings
 from scrapy import signals
 
-urls = ["http://stats.ncaa.org/game/box_score/170096"]
+failed = []
 
 class BoxSpider(scrapy.Spider):
     name = "box"
     allowed_domains = ["stats.ncaa.org"]
-    start_urls = dbutil.get_games_to_scrape(from_table='box', num_games=10000)
+    start_urls = dbutil.get_games_to_scrape(season=2016, from_table='box', num_games=1000)
 
     def __init__(self):
         self.data = []
@@ -29,7 +25,11 @@ class BoxSpider(scrapy.Spider):
             self.failed_urls.append(response.url)
             print response.url
         soup = BeautifulSoup(response.body, 'html.parser')
-        header_table, box_stats = BoxScraper.extract_box_stats(soup, response.url)
+        try:
+            header_table, box_stats = BoxScraper.extract_box_stats(soup, response.url)
+        except Exception, e:
+            print e
+            failed.append(response.url)
         dbutil.insert_box_stats(box_stats)
 
 def spider_closing(spider):
@@ -40,11 +40,16 @@ def spider_closing(spider):
 
 if __name__ == "__main__":
     spider = BoxSpider()
-    crawler = Crawler(spider, Settings())
+    settings = Settings()
+    settings.set('DOWNLOAD_DELAY', 0.5)
+    settings.set('COOKIES_ENABLED', False)
+
+    crawler = Crawler(spider, settings)
     crawler.crawl()
     print "______"
     # stop reactor when spider closes
     crawler.signals.connect(spider_closing, signal=signals.spider_closed)
     reactor.run()
     print crawler.stats.get_stats()
+    print failed
 
