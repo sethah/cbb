@@ -27,10 +27,11 @@ class BoxSpider(scrapy.Spider):
         soup = BeautifulSoup(response.body, 'html.parser')
         try:
             header_table, box_stats = BoxScraper.extract_box_stats(soup, response.url)
+            if BoxScraper.is_valid_stats(box_stats):
+                dbutil.insert_box_stats(box_stats)
         except Exception, e:
             print e
             failed.append(response.url)
-        dbutil.insert_box_stats(box_stats)
 
 def spider_closing(spider):
     """Activates on spider closed signal"""

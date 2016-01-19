@@ -1,12 +1,12 @@
 import csv
 import os
-
-import scrapy
 from bs4 import BeautifulSoup
 from twisted.internet import reactor
 
 from DataCollection.ScrapeUtils import ScheduleScraper
 import DataCollection.DBScrapeUtils as dbutil
+
+import scrapy
 from scrapy.crawler import Crawler
 from scrapy.settings import Settings
 from scrapy import signals
@@ -25,8 +25,7 @@ class ScheduleSpider(scrapy.Spider):
     def parse(self, response):
         if response.status == 404:
             self.failed_urls.append(response.url)
-            print '****************'
-            print response.url
+            print '404 error: %s' % response.url
         try:
             soup = BeautifulSoup(response.body, 'html.parser')
             games = ScheduleScraper.get_team_schedule(soup, response.url)
@@ -35,10 +34,6 @@ class ScheduleSpider(scrapy.Spider):
             self.items.append(item)
         except Exception, e:
             print e
-
-    def handle_spider_closed(self, spider, reason):
-        self.crawler.stats.set_value('failed_urls', ','.join(spider.failed_urls))
-        self.crawler.stats.set_value('seth', 'asdfasdfasdf')
 
 class ScheduleItem(scrapy.Item):
     games = scrapy.Field()
