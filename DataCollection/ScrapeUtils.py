@@ -112,12 +112,11 @@ class BoxScraper(object):
     @staticmethod
     def is_valid_stats(stats):
         team_stats = stats[stats['first_name'] == 'Totals']
-        has_teams = team_stats.shape[0] != 2
+        has_teams = team_stats.shape[0] == 2
 
         min_score = 5
-        point_totals = team_stats['pts'].values
-        valid_score = (point_totals > min_score).sum() != 2
-
+        point_totals = team_stats['PTS'].values
+        valid_score = (point_totals > min_score).sum() == 2
         return has_teams and valid_score
 
     @classmethod

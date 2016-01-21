@@ -1,6 +1,8 @@
 import scrapy
 from bs4 import BeautifulSoup
 from twisted.internet import reactor
+import sys
+import traceback
 
 from DataCollection.ScrapeUtils import BoxScraper
 import DataCollection.DBScrapeUtils as dbutil
@@ -13,7 +15,7 @@ failed = []
 class BoxSpider(scrapy.Spider):
     name = "box"
     allowed_domains = ["stats.ncaa.org"]
-    start_urls = dbutil.get_games_to_scrape(season=2016, from_table='box', num_games=1000)
+    start_urls = dbutil.get_games_to_scrape(season=2016, from_table='box', num_games=500)
 
     def __init__(self):
         self.data = []
@@ -24,13 +26,13 @@ class BoxSpider(scrapy.Spider):
         if response.status == 404:
             self.failed_urls.append(response.url)
             print response.url
-        soup = BeautifulSoup(response.body, 'html.parser')
         try:
+            soup = BeautifulSoup(response.body, 'html.parser')
             header_table, box_stats = BoxScraper.extract_box_stats(soup, response.url)
             if BoxScraper.is_valid_stats(box_stats):
                 dbutil.insert_box_stats(box_stats)
-        except Exception, e:
-            print e
+        except:
+            traceback.print_exc()
             failed.append(response.url)
 
 def spider_closing(spider):
