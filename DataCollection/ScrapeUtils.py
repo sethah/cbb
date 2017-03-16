@@ -4,7 +4,7 @@ import numpy as np
 import re
 from collections import defaultdict
 
-import DB
+import DataCollection.DB as DB
 
 import org_ncaa
 import org_ncaa.scrape as nscr
@@ -14,7 +14,7 @@ class ScheduleScraper(object):
 
     @staticmethod
     def get_urls(years=None):
-        base_url = 'http://stats.ncaa.org/team/index/'
+        base_url = 'http://stats.ncaa.org/team/'
         urls = []
         if years is None:
             years = org_ncaa.all_years()
@@ -22,7 +22,7 @@ class ScheduleScraper(object):
             # get division one teams for the year
             d1 = pd.read_sql("SELECT ncaaid FROM division_one WHERE year=%s" % year, DB.conn)
             year_code = org_ncaa.convert_ncaa_year_code(year)
-            urls += [base_url + '%s?org_id=%s' % (year_code, team) for team in d1.ncaaid.values]
+            urls += [base_url + '%s/%s' % (team, year_code) for team in d1.ncaaid.values]
         return urls
 
     @staticmethod
@@ -245,18 +245,35 @@ class PBPScraper(object):
         url is a string which links to the pbp page
         """
         html_tables = soup.findAll('table', {'class': 'mytable'})
+        team1_id, team2_id = cls.get_team_ids(html_tables[0])
         htable = pd.read_html(str(html_tables[0]), header=0)[0]
-        table = pd.read_html(str(html_tables[1]), skiprows=0, header=0, infer_types=False)[0]
-        for i in xrange(2, len(html_tables)):
-            table = pd.concat([table, pd.read_html(str(html_tables[i]), skiprows=0, header=0, infer_types=False)[0]])
+        table = pd.read_html(str(html_tables[1]), skiprows=0, header=0)[0]
+        for i in range(2, len(html_tables)):
+            table = pd.concat([table, pd.read_html(str(html_tables[i]), skiprows=0, header=0)[0]])
 
         table['game_id'] = nscr.stats_link_to_gameid(url)
-        table = cls.format_pbp_stats(table, htable)
+        table = cls.format_pbp_stats(table, htable, team1_id, team2_id)
 
         return htable, table
 
     @classmethod
-    def format_pbp_stats(cls, table, htable):
+    def get_team_ids(cls, html):
+        rows = html.findAll('tr')
+        row1 = rows[1]
+        row2 = rows[2]
+        link1 = row1.find('a')
+        team1_id, team2_id = None, None
+        if link1:
+            url = link1['href']
+            team1_id = nscr.url_to_teamid(url)
+        link2 = row2.find('a')
+        if link2:
+            url = link2['href']
+            team2_id = nscr.url_to_teamid(url)
+        return team1_id, team2_id
+
+    @classmethod
+    def format_pbp_stats(cls, table, htable, team1_id, team2_id):
         """
         INPUT: NCAAScraper, DATAFRAME, DATAFRAME
         OUTPUT: DATAFRAME
@@ -270,15 +287,16 @@ class PBPScraper(object):
         d = defaultdict(list)
         half = 0
         for i, row in table.iterrows():
-            if row.Score == 'nan':
+            if str(row.Score) == 'nan':
                 half += 1
                 continue
-            if row.team1 == 'nan':
+            if str(row.team1) == 'nan':
                 play_string = row.team2
-                d['teamid'].append(1)
+                d['team_id'].append(team2_id)
             else:
                 play_string = row.team1
-                d['teamid'].append(0)
+                d['team_id'].append(team1_id)
+            # print(i, row.Time, play_string)
             play, first_name, last_name = nscr.split_play(play_string)
             play = nscr.string_to_stat(play)
 
@@ -296,19 +314,20 @@ class PBPScraper(object):
             d['time'].append(t)
 
         # if the score is nan then it is a end of half row
-        cond1 = table.Score != 'nan'
+        cond1 = table.Score.astype(str) != 'nan'
 
         table = table[cond1]
         for col in d:
+            # print(len(d[col]), table.shape)
             table[col] = d[col]
 
         cond2 = table.time > 0
         table = table[cond2]
         team1 = htable.iloc[0, 0]
         team2 = htable.iloc[1, 0]
-        table['team'] = table.teamid.map(lambda x: team1 if x==0 else team2)
+        # table['team'] = table.teamid.map(lambda x: team1 if x == team1_id else team2)
 
-        keep_cols = ['game_id', 'time', 'teamid', 'team', 'first_name',
+        keep_cols = ['game_id', 'team_id', 'time', 'first_name',
                      'last_name', 'play', 'hscore', 'ascore']
         return table[keep_cols]
 
@@ -378,7 +397,7 @@ class KenpomScraper(object):
         if substring is not None:
             return int(substring.split("y=")[-1])
         else:
-            raise ValueError, "couldn't find the year"
+            raise ValueError("couldn't find the year")
 
 
     @classmethod
@@ -435,8 +454,7 @@ class KenpomScraper(object):
         try:
             cur.executemany(q, vals)
             DB.conn.commit()
-        except Exception, e:
-            print e
+        except Exception:
             DB.conn.rollback()
             raise
 

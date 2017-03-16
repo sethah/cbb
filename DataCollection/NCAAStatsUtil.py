@@ -250,7 +250,7 @@ class NCAAStatsUtil(object):
         if player == 'TEAM' or player == 'TM':
             last_name, first_name = '', 'TEAM'
         elif ',' not in player:
-            print 'Bad player string', player
+            print('Bad player string', player)
             last_name, first_name = ('', '')
         else:
             splits = player.split(',')

@@ -1,5 +1,6 @@
 import pandas as pd
 import numpy as np
+import sys
 
 from DataCollection.NCAAStatsUtil import NCAAStatsUtil as ncaa_util
 import DataCollection.DB as DB
@@ -26,11 +27,10 @@ def insert_box_stats(box_table):
     try:
         CUR.executemany(q, vals)
         CONN.commit()
-    except Exception, e:
-        print e
+    except Exception:
         CONN.rollback()
 
-def get_games_to_scrape(year=None, season=None, from_table='box', num_games=500):
+def get_games_to_scrape(year=None, season=None, from_table='box', link_type='box', num_games=500):
     """Get a list of games that haven't been scraped"""
     table = DB.TABLES.get(from_table)
     assert table, "From table must be in %s" % DB.TABLES.keys()
@@ -49,18 +49,18 @@ def get_games_to_scrape(year=None, season=None, from_table='box', num_games=500)
     q = """ SELECT game_id
             FROM {games}
             WHERE game_id NOT IN
-                (SELECT DISTINCT(game_id) FROM {box})
+                (SELECT DISTINCT(game_id) FROM {table})
             AND game_id IS NOT NULL
             AND game_id NOT IN (SELECT game_id FROM url_errors)
             {year_filter}
             ORDER BY DT DESC
             LIMIT {num_games}
-        """.format(table=table, year_filter=year_filter, num_games=num_games,
+        """.format(year_filter=year_filter, num_games=num_games,
                    check_link=from_table, games=DB.TABLES.get('games'),
-                   box=DB.TABLES.get('box'))
+                   table=DB.TABLES.get(from_table))
     CUR.execute(q)
     results = CUR.fetchall()
-    results = [ncaa_util.stats_link(x[0], from_table) for x in results]
+    results = [ncaa_util.stats_link(x[0], link_type) for x in results]
     return results
 
 def get_team_pages(year=None):
@@ -86,8 +86,8 @@ def sql_convert(values):
 
     Convert floats to ints and nans to None
     """
-    for i in xrange(len(values)):
-        for j in xrange(len(values[0])):
+    for i in range(len(values)):
+        for j in range(len(values[0])):
             if type(values[i][j]) == float:
                 if values[i][j].is_integer():
                     values[i][j] = int(values[i][j])
@@ -181,6 +181,21 @@ def insert_pbp_data(values):
         CONN.rollback()
         raise
 
+def insert_raw_pbp_data(values):
+    values = sql_convert(values)
+    q =  """ INSERT INTO raw_pbp
+                (game_id, team_id, time, first_name, last_name,
+                 play, hscore, ascore)
+             VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+         """
+
+    try:
+        CUR.executemany(q, values)
+        CONN.commit()
+    except:
+        CONN.rollback()
+        raise
+
 def update_games_table():
     """Routine to update the games table from a list of scraped games"""
     column_names = ['game_id', 'dt', 'hteam_id', 'ateam_id', 'opp_string', 'home_outcome',
@@ -191,25 +206,33 @@ def update_games_table():
     insert_missing(scraped)
 
 def season_query_helper():
-    # sub = """(SELECT
-    #             g.dt,
-    #             CASE
-    #                 WHEN EXTRACT(month from g.dt) <= 6 THEN EXTRACT(year from g.dt)
-    #                 ELSE EXTRACT(year from g.dt) + 1
-    #             END AS season,
-    #             b.*
-    #          FROM box_stats b
-    #          JOIN games_test g
-    #          ON b.game_id = g.game_id)"""
-    # season = """SELECT season, count(distinct(game_id))
-    #             FROM %s AS sub
-    #             GROUP BY season""" % sub
-    extract_season = """(CASE
-                        WHEN EXTRACT(month from dt) <= 6 THEN EXTRACT(year from dt)
-                        ELSE EXTRACT(year from dt) + 1
-                    END)"""
-    q = """SELECT %s AS season, count(%s)
-        FROM games_test
-        GROUP BY season""" % (extract_season, extract_season)
-    q.replace("\n", "")
+    sub = """(SELECT
+                g.dt,
+                CASE
+                    WHEN EXTRACT(month from g.dt) <= 6 THEN EXTRACT(year from g.dt)
+                    ELSE EXTRACT(year from g.dt) + 1
+                END AS season,
+                b.*
+             FROM box_stats b
+             JOIN games_test g
+             ON b.game_id = g.game_id)"""
+    season = """SELECT season, count(distinct(game_id))
+                FROM %s AS sub
+                GROUP BY season""" % sub
+
+    return pd.read_sql(season, DB.conn)
+
+    # extract_season = """(CASE
+    #                     WHEN EXTRACT(month from dt) <= 6 THEN EXTRACT(year from dt)
+    #                     ELSE EXTRACT(year from dt) + 1
+    #                 END)"""
+    # q = """SELECT %s AS season, count(%s)
+    #     FROM games_test
+    #     GROUP BY season""" % (extract_season, extract_season)
+    # q.replace("\n", "")
+
+if __name__ == "__main__":
+    queries = {'season_summary': season_query_helper()}
+    query = sys.argv[1]
+    print(queries[query])
 

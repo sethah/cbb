@@ -91,8 +91,7 @@ def create_raw_pbp():
         (
         id SERIAL PRIMARY KEY,
         game_id INT REFERENCES {games}(game_id) NOT NULL,
-        team TEXT NOT NULL,
-        teamid INT,
+        team_id INT,
         time REAL,
         first_name TEXT NOT NULL,
         last_name TEXT,
@@ -149,4 +148,4 @@ def add_table(qfunc):
         DB.conn.commit()
     except:
         DB.conn.rollback()
-        print "failed to add table"
+        print("failed to add table")

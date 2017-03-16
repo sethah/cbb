@@ -1,5 +1,6 @@
 import pandas as pd
 import psycopg2
+import sys
 
 def create_compact(cur):
     q = """ CREATE TABLE reg_compact
@@ -223,30 +224,34 @@ def create_pbp_detailed(cur):
         """
     cur.execute(q)
 
-if __name__ == '__main__':
-    conn = psycopg2.connect(database="cbb", user="seth", password="abc123",
-                            host="localhost", port="5432")
-    cur = conn.cursor()
-    # create_detailed(cur)
-    # create_teams(cur)
-    # create_seasons(cur)
-    # create_seeds(cur)
-    # create_ncaa_games(cur)
-    # create_ncaa_box(cur)
-    # create_ncaa_pbp(cur)
-    create_pbp_detailed(cur)
-    # create_url_errors(cur)
-    conn.commit()
-    conn.close()
+# if __name__ == '__main__':
+#     conn = psycopg2.connect(database="cbb", user="seth", password="abc123",
+#                             host="localhost", port="5432")
+#     cur = conn.cursor()
+#     # create_detailed(cur)
+#     # create_teams(cur)
+#     # create_seasons(cur)
+#     # create_seeds(cur)
+#     # create_ncaa_games(cur)
+#     # create_ncaa_box(cur)
+#     # create_ncaa_pbp(cur)
+#     create_pbp_detailed(cur)
+#     # create_url_errors(cur)
+#     conn.commit()
+#     conn.close()
+#
+# q = """ WITH sub AS
+#         (SELECT COUNT(ncaa_game_id), ncaa_game_id
+#          FROM games_ncaa
+#          GROUP BY ncaa_game_id
+#          ORDER BY count desc)
+#
+#         SELECT a.dt, a.team1, a.team2, b.count, a.ncaa_game_id
+#         FROM games_ncaa a
+#         JOIN sub b
+#         ON a.ncaa_game_id=b.ncaa_game_id
+#         ORDER BY a.dt"""
 
-q = """ WITH sub AS
-        (SELECT COUNT(ncaa_game_id), ncaa_game_id
-         FROM games_ncaa
-         GROUP BY ncaa_game_id
-         ORDER BY count desc)
-
-        SELECT a.dt, a.team1, a.team2, b.count, a.ncaa_game_id
-        FROM games_ncaa a
-        JOIN sub b
-        ON a.ncaa_game_id=b.ncaa_game_id
-        ORDER BY a.dt"""
+if __name__ == "__main__":
+    for arg in sys.argv:
+        print arg

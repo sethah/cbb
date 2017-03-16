@@ -6,11 +6,13 @@ from DataCollection.ScrapeUtils import KenpomScraper
 from scrapy.crawler import Crawler
 from scrapy.settings import Settings
 from scrapy import signals
+from scrapy.xlib.pydispatch import dispatcher
 
 YEARS = range(2002, 2016)
+YEARS = [2016]
 
 class KenpomSpider(scrapy.Spider):
-    name = "box"
+    name = "KenpomSpider"
     allowed_domains = ["kenpom.com"]
     start_urls = KenpomScraper.get_urls(YEARS)
 
@@ -28,11 +30,9 @@ class KenpomSpider(scrapy.Spider):
         df = KenpomScraper.extract_teams(soup, year)
         KenpomScraper.insert_data(df)
 
-def spider_closing(spider):
-    """Activates on spider closed signal"""
-    spider.crawler.stats.set_value('failed_urls', ','.join(spider.failed_urls))
-    reactor.stop()
-
+    def spider_closed(self, spider):
+        """Activates on spider closed signal"""
+        spider.crawler.stats.set_value('failed_urls', ','.join(spider.failed_urls))
 
 if __name__ == "__main__":
     spider = KenpomSpider()

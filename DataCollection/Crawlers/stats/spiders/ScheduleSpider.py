@@ -10,44 +10,58 @@ import scrapy
 from scrapy.crawler import Crawler
 from scrapy.settings import Settings
 from scrapy import signals
+from scrapy.xlib.pydispatch import dispatcher
 
 class ScheduleSpider(scrapy.Spider):
-    name = "schedule"
+    name = "ScheduleSpider"
     allowed_domains = ["stats.ncaa.org"]
-    start_urls = ScheduleScraper.get_urls([2016])
-    print start_urls
+    # start_urls = ScheduleScraper.get_urls([2016])
+    start_urls = ['http://stats.ncaa.org/team/141/12260']
+    print(start_urls)
 
     def __init__(self):
-        self.data = []
+        self.soups = []
         self.failed_urls = []
-        self.items = []
+        self.games = []
+        dispatcher.connect(self.spider_closed, signals.spider_closed)
 
     def parse(self, response):
         if response.status == 404:
             self.failed_urls.append(response.url)
-            print '404 error: %s' % response.url
+            print('404 error: %s' % response.url)
         try:
             soup = BeautifulSoup(response.body, 'html.parser')
             games = ScheduleScraper.get_team_schedule(soup, response.url)
-            item = ScheduleItem()
-            item['games'] = games
-            self.items.append(item)
-        except Exception, e:
-            print e
+            # item = ScheduleItem()
+            # item['games'] = games
+            self.games.append(games)
+            self.soups.append(str(soup))
+        except Exception as e:
+            # self.data.append("eee")
+            print(e)
+
+    def spider_closed(self, spider):
+        """Activates on spider closed signal"""
+        # log.msg("Closing reactor", level=log.INFO)
+        spider.crawler.stats.set_value('failed_urls', ','.join(spider.failed_urls))
+        print("a;sldkfja;slfdjds")
+        # print(self.soups)
+
+        text_file = open("/Users/sethhendrickson/cbbdb/soup.txt", "w")
+        text_file.write(self.soups[0])
+        text_file.close()
+
+        with open("output.csv", "a") as f:
+            writer = csv.writer(f)
+            for games in self.games:
+                writer.writerows(games)
+        dbutil.update_games_table()
+        os.remove("output.csv")
 
 class ScheduleItem(scrapy.Item):
     games = scrapy.Field()
 
-def spider_closing(spider):
-    """Activates on spider closed signal"""
-    # log.msg("Closing reactor", level=log.INFO)
-    spider.crawler.stats.set_value('failed_urls', ','.join(spider.failed_urls))
-    reactor.stop()
 
-    with open("output.csv", "a") as f:
-        writer = csv.writer(f)
-        for item in spider.items:
-            writer.writerows(item['games'])
 
 if __name__ == "__main__":
     spider = ScheduleSpider()
@@ -56,10 +70,10 @@ if __name__ == "__main__":
     settings.set('COOKIES_ENABLED', False)
     crawler = Crawler(spider, settings)
     crawler.crawl()
-    # stop reactor when spider closes
     crawler.signals.connect(spider_closing, signal=signals.spider_closed)
-    reactor.run()
-    print crawler.stats.get_stats()
+    # reactor.run()
+    print(crawler.stats.get_stats())
     dbutil.update_games_table()
     os.remove("output.csv")
+    # reactor.stop()
 
